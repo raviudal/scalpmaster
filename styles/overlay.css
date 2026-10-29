@@ -1,8 +1,8 @@
-/* FYERS ScalpMaster - Floating Practice Terminal Overlay */
+/* FYERS ScalpMaster - Compact Floating Scalping HUD */
 :root {
-  --fsm-bg: rgba(15, 23, 42, 0.94);
-  --fsm-card-bg: rgba(30, 41, 59, 0.75);
-  --fsm-border: rgba(51, 65, 85, 0.85);
+  --fsm-bg: rgba(15, 23, 42, 0.95);
+  --fsm-card-bg: rgba(30, 41, 59, 0.7);
+  --fsm-border: rgba(51, 65, 85, 0.8);
   --fsm-text: #f8fafc;
   --fsm-text-muted: #94a3b8;
   --fsm-green: #10b981;
@@ -17,19 +17,19 @@
 
 #fyers-scalpmaster-hud {
   position: fixed;
-  top: 70px;
-  right: 25px;
-  width: 350px;
+  top: 65px;
+  right: 20px;
+  width: 290px;
   background: var(--fsm-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--fsm-border);
-  border-radius: 12px;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
   z-index: 99999999;
   font-family: var(--fsm-font);
   color: var(--fsm-text);
-  font-size: 13px;
+  font-size: 12px;
   user-select: none;
   transition: box-shadow 0.2s, opacity 0.2s;
 }
@@ -38,15 +38,15 @@
   box-sizing: border-box;
 }
 
-/* Header */
+/* Compact Header */
 .fsm-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 6px 10px;
   background: rgba(30, 41, 59, 0.95);
-  border-top-left-radius: 12px;
-  border-top-right-radius: 12px;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
   border-bottom: 1px solid var(--fsm-border);
   cursor: grab;
 }
@@ -58,18 +58,17 @@
 .fsm-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
   color: #fff;
-  letter-spacing: 0.5px;
 }
 
 .fsm-badge {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -87,7 +86,7 @@
 .fsm-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .fsm-icon-btn {
@@ -95,9 +94,9 @@
   border: none;
   color: var(--fsm-text-muted);
   cursor: pointer;
-  padding: 4px;
+  padding: 2px 4px;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -109,31 +108,31 @@
   color: #fff;
 }
 
-/* Main Body */
+/* Body */
 .fsm-body {
-  padding: 12px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 600px;
+  gap: 6px;
+  max-height: 520px;
   overflow-y: auto;
 }
 
 .fsm-body::-webkit-scrollbar {
-  width: 5px;
+  width: 4px;
 }
 .fsm-body::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
-/* Instrument & Live Quote Strip */
-.fsm-quote-strip {
+/* Big Live Price & Instrument Hero Section */
+.fsm-hero-section {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: var(--fsm-card-bg);
-  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95));
+  padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -141,12 +140,12 @@
 .fsm-symbol-info {
   display: flex;
   flex-direction: column;
-  max-width: 190px;
+  max-width: 140px;
 }
 
 .fsm-symbol-name {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
   color: #38bdf8;
   white-space: nowrap;
   overflow: hidden;
@@ -154,12 +153,11 @@
 }
 
 .fsm-symbol-desc {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--fsm-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 1px;
 }
 
 .fsm-ltp-box {
@@ -169,64 +167,68 @@
 }
 
 .fsm-ltp-val {
-  font-size: 18px;
-  font-weight: 800;
+  font-size: 20px;
+  font-weight: 900;
   font-family: monospace;
   color: #fff;
   letter-spacing: 0.5px;
-  transition: color 0.2s;
+  line-height: 1.1;
+  transition: color 0.15s;
 }
 
 .fsm-uptick {
   color: #34d399 !important;
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
 }
 
 .fsm-downtick {
   color: #f87171 !important;
+  text-shadow: 0 0 8px rgba(248, 113, 113, 0.5);
 }
 
-/* Overall Day PnL Box */
+/* Compact Day PnL Summary */
 .fsm-day-pnl-card {
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  padding: 10px 14px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 6px 8px;
   text-align: center;
 }
 
 .fsm-day-pnl-label {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--fsm-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin-bottom: 2px;
+  letter-spacing: 0.5px;
 }
 
 .fsm-day-pnl-value {
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 800;
   font-family: monospace;
   letter-spacing: 0.5px;
   color: #94a3b8;
+  line-height: 1.2;
+  margin: 1px 0;
 }
 
 .fsm-pnl-positive {
   color: #34d399 !important;
-  text-shadow: 0 0 12px rgba(52, 211, 153, 0.35);
+  text-shadow: 0 0 10px rgba(52, 211, 153, 0.3);
 }
 
 .fsm-pnl-negative {
   color: #f87171 !important;
-  text-shadow: 0 0 12px rgba(248, 113, 113, 0.35);
+  text-shadow: 0 0 10px rgba(248, 113, 113, 0.3);
 }
 
 .fsm-stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .fsm-stat-item {
@@ -236,95 +238,82 @@
 }
 
 .fsm-stat-label {
-  font-size: 9px;
+  font-size: 8px;
   color: var(--fsm-text-muted);
 }
 
 .fsm-stat-val {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
-  margin-top: 2px;
 }
 
-/* Lot Size & Quantity Controls */
-.fsm-order-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.fsm-lot-control-row {
+/* Compact Lot Stepper Row */
+.fsm-lot-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   background: var(--fsm-card-bg);
   border: 1px solid var(--fsm-border);
-  border-radius: 8px;
-  padding: 6px 10px;
+  border-radius: 6px;
+  padding: 3px 6px;
 }
 
 .fsm-lot-stepper {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
 }
 
 .fsm-step-btn {
   background: #334155;
   color: #fff;
   border: 1px solid #475569;
-  border-radius: 6px;
-  width: 32px;
-  height: 30px;
-  font-size: 16px;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.15s;
+  padding: 0;
+  line-height: 1;
 }
 
 .fsm-step-btn:hover {
   background: #475569;
-  border-color: #64748b;
 }
 
 .fsm-step-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.92);
 }
 
 .fsm-lot-summary {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 120px;
-}
-
-.fsm-lot-count {
-  font-weight: 800;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: 11px;
   color: #f1f5f9;
 }
 
-.fsm-total-qty {
-  font-size: 11px;
+.fsm-lot-sub {
+  font-size: 9px;
   color: var(--fsm-accent);
-  font-weight: 600;
+  margin-left: 2px;
 }
 
 .fsm-lot-multipliers {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
 .fsm-mult-btn {
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid var(--fsm-border);
   color: var(--fsm-text-muted);
-  border-radius: 4px;
-  padding: 4px 6px;
-  font-size: 10px;
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-size: 9px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
@@ -336,29 +325,31 @@
   border-color: var(--fsm-accent);
 }
 
+/* Small, Sleek Scalping Buttons */
 .fsm-trade-btns {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 6px;
 }
 
-.fsm-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 8px;
-  border-radius: 8px;
+.fsm-btn-small {
+  padding: 5px 6px;
+  border-radius: 5px;
   border: none;
-  font-weight: 800;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: 11px;
   cursor: pointer;
   color: #fff;
-  transition: all 0.15s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.12s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  line-height: 1.1;
 }
 
-.fsm-btn:active {
+.fsm-btn-small:active {
   transform: translateY(1px) scale(0.97);
 }
 
@@ -368,7 +359,6 @@
 
 .fsm-btn-buy:hover {
   background: linear-gradient(135deg, #34d399, #10b981);
-  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.45);
 }
 
 .fsm-btn-sell {
@@ -377,90 +367,88 @@
 
 .fsm-btn-sell:hover {
   background: linear-gradient(135deg, #f87171, #ef4444);
-  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.45);
 }
 
-.fsm-btn-sub {
-  font-size: 10px;
-  opacity: 0.85;
-  margin-top: 2px;
-  font-weight: 600;
+.fsm-shortcut {
+  font-size: 9px;
+  opacity: 0.75;
+  font-weight: 500;
 }
 
 .fsm-action-strip {
   display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 8px;
+  grid-template-columns: 1.8fr 1fr;
+  gap: 6px;
 }
 
 .fsm-btn-exit {
-  background: #eab308;
-  color: #0f172a;
+  background: #ca8a04;
+  color: #fff;
   border: none;
-  border-radius: 6px;
-  padding: 8px;
-  font-weight: 800;
-  font-size: 12px;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-weight: 700;
+  font-size: 10px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.12s;
 }
 
 .fsm-btn-exit:hover {
-  background: #facc15;
+  background: #eab308;
 }
 
 .fsm-btn-exit:disabled {
   background: #334155;
   color: #64748b;
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 .fsm-btn-reverse {
-  background: #6366f1;
+  background: #4f46e5;
   color: #fff;
   border: none;
-  border-radius: 6px;
-  padding: 8px;
-  font-weight: 800;
-  font-size: 12px;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-weight: 700;
+  font-size: 10px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.12s;
 }
 
 .fsm-btn-reverse:hover {
-  background: #818cf8;
+  background: #6366f1;
 }
 
 .fsm-btn-reverse:disabled {
   background: #334155;
   color: #64748b;
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 /* Active Live Position Card */
 .fsm-position-card {
   background: var(--fsm-card-bg);
   border: 1px solid var(--fsm-border);
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 6px;
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .fsm-position-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .fsm-pos-type {
   font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .fsm-type-long {
@@ -476,27 +464,28 @@
 }
 
 .fsm-position-pnl {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   font-family: monospace;
+  line-height: 1.1;
 }
 
 .fsm-pos-details {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--fsm-text-muted);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
-  padding-top: 4px;
+  padding-top: 3px;
 }
 
 .fsm-no-pos {
   text-align: center;
   color: var(--fsm-text-muted);
-  font-size: 12px;
-  padding: 12px 0;
+  font-size: 11px;
+  padding: 8px 0;
   background: rgba(15, 23, 42, 0.5);
-  border-radius: 6px;
+  border-radius: 5px;
   border: 1px dashed var(--fsm-border);
 }
 
@@ -504,14 +493,14 @@
 .fsm-tab-nav {
   display: flex;
   border-bottom: 1px solid var(--fsm-border);
-  gap: 4px;
+  gap: 2px;
 }
 
 .fsm-tab {
   flex: 1;
   text-align: center;
-  padding: 6px;
-  font-size: 11px;
+  padding: 4px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--fsm-text-muted);
   cursor: pointer;
@@ -525,11 +514,11 @@
 }
 
 .fsm-orders-list {
-  max-height: 140px;
+  max-height: 120px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .fsm-order-row {
@@ -537,22 +526,22 @@
   align-items: center;
   justify-content: space-between;
   background: rgba(15, 23, 42, 0.6);
-  padding: 6px 8px;
+  padding: 4px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .fsm-order-side {
   font-weight: 700;
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-size: 10px;
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-size: 9px;
 }
 
 /* Minimized HUD pill */
 .fsm-minimized {
   width: auto !important;
-  min-width: 200px;
+  min-width: 170px;
 }
 .fsm-minimized .fsm-body {
   display: none !important;
@@ -561,21 +550,21 @@
 /* Toast alert inside HUD */
 .fsm-toast {
   position: absolute;
-  bottom: 8px;
+  bottom: 6px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(15, 23, 42, 0.98);
   border: 1px solid var(--fsm-accent);
   color: #fff;
-  padding: 6px 14px;
-  border-radius: 20px;
-  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 10px;
   font-weight: 600;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.25s;
   white-space: nowrap;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
   z-index: 1000;
 }
 .fsm-toast.show {
