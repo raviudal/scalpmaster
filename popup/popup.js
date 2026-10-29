@@ -365,5 +365,79 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // -------------------------------------------------------------
+  // DYNAMIC REMOTE BROADCAST / ANNOUNCEMENT SYSTEM
+  // -------------------------------------------------------------
+  const BROADCAST_URL = "https://raw.githubusercontent.com/raviudal/scalpmaster/main/docs/broadcast.json";
+
+  function checkBroadcastNotice() {
+    const bannerContainer = document.getElementById('broadcast-container');
+    if (!bannerContainer) return;
+
+    fetch(BROADCAST_URL, { cache: 'no-cache' })
+      .then(res => {
+        if (!res.ok) throw new Error('Network response not ok');
+        return res.json();
+      })
+      .then(data => {
+        if (!data || !data.enabled || !data.id) {
+          bannerContainer.style.display = 'none';
+          return;
+        }
+
+        chrome.storage.local.get(['dismissed_broadcast_id'], (result) => {
+          if (result && result.dismissed_broadcast_id === data.id) {
+            bannerContainer.style.display = 'none';
+            return;
+          }
+
+          renderBroadcastBanner(bannerContainer, data);
+        });
+      })
+      .catch(() => {
+        // Fail silently when offline or unreachable
+        bannerContainer.style.display = 'none';
+      });
+  }
+
+  function renderBroadcastBanner(container, data) {
+    container.innerHTML = `
+      <div class="broadcast-header">
+        <span class="broadcast-title">${escapeHTML(data.title || '⚡ Announcement')}</span>
+        <button id="close-broadcast-btn" class="broadcast-close" title="Dismiss">&times;</button>
+      </div>
+      <div class="broadcast-message">${escapeHTML(data.message || '')}</div>
+      ${data.action_url ? `<a href="#" id="broadcast-action-link" class="broadcast-link">Learn More ➔</a>` : ''}
+    `;
+    container.style.display = 'block';
+
+    const closeBtn = document.getElementById('close-broadcast-btn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        container.style.display = 'none';
+        chrome.storage.local.set({ dismissed_broadcast_id: data.id });
+      });
+    }
+
+    const actionLink = document.getElementById('broadcast-action-link');
+    if (actionLink && data.action_url) {
+      actionLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        chrome.tabs.create({ url: data.action_url });
+      });
+    }
+  }
+
+  function escapeHTML(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  checkBroadcastNotice();
+
   loadData();
 });
