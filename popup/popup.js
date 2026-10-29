@@ -24,16 +24,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // 1. LOAD DATA & RENDER 15-DAY EQUITY CURVE
   // -------------------------------------------------------------
   function loadData() {
-    chrome.storage.local.get([STATE_KEY], (res) => {
-      if (res && res[STATE_KEY]) {
-        const data = res[STATE_KEY];
-        currentCompletedTrades = data.completedTrades || [];
-        isHudVisible = data.hudVisible !== false;
-        updateHudButtonUI(isHudVisible);
-        render15DayEquityChart(currentCompletedTrades);
-      } else {
-        render15DayEquityChart([]);
+    chrome.storage.local.get(null, (allData) => {
+      const v7 = allData && allData['fsm_state_v7'] ? allData['fsm_state_v7'] : {};
+      const v6 = allData && allData['fsm_state_v6'] ? allData['fsm_state_v6'] : {};
+      const v5 = allData && allData['fsm_state_v5'] ? allData['fsm_state_v5'] : {};
+
+      let trades = v7.completedTrades || [];
+      if (!trades || trades.length === 0) {
+        trades = (v6.completedTrades && v6.completedTrades.length > 0) ? v6.completedTrades : (v5.completedTrades || []);
+        if (trades.length > 0) {
+          v7.completedTrades = trades;
+          v7.dayStats = v7.dayStats || v6.dayStats || v5.dayStats;
+          chrome.storage.local.set({ [STATE_KEY]: v7 });
+        }
       }
+
+      currentCompletedTrades = trades;
+      isHudVisible = v7.hudVisible !== false;
+      updateHudButtonUI(isHudVisible);
+      render15DayEquityChart(currentCompletedTrades);
     });
   }
 
@@ -198,20 +207,40 @@ document.addEventListener('DOMContentLoaded', () => {
     isHudVisible = !isHudVisible;
     updateHudButtonUI(isHudVisible);
 
-    // Save in storage
+    // Save in storage (triggers chrome.storage.onChanged in content.js immediately)
     chrome.storage.local.get([STATE_KEY], (res) => {
       const data = res && res[STATE_KEY] ? res[STATE_KEY] : {};
       data.hudVisible = isHudVisible;
       chrome.storage.local.set({ [STATE_KEY]: data });
     });
 
-    // Message active tab
+    // Message all trade.fyers.in tabs
+    chrome.tabs.query({ url: "*://trade.fyers.in/*" }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        tabs.forEach(t => {
+          try {
+            chrome.tabs.sendMessage(t.id, {
+              action: 'SET_HUD_VISIBILITY',
+              visible: isHudVisible
+            }, () => {
+              if (chrome.runtime.lastError) {}
+            });
+          } catch(e) {}
+        });
+      }
+    });
+
+    // Also message active tab as fallback
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs && tabs[0] && tabs[0].id) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'SET_HUD_VISIBILITY',
-          visible: isHudVisible
-        });
+        try {
+          chrome.tabs.sendMessage(tabs[0].id, {
+            action: 'SET_HUD_VISIBILITY',
+            visible: isHudVisible
+          }, () => {
+            if (chrome.runtime.lastError) {}
+          });
+        } catch(e) {}
       }
     });
   });

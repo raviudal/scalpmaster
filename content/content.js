@@ -1011,9 +1011,11 @@
     }
 
     if (state.hudVisible === false) {
-      container.style.display = 'none';
+      container.classList.add('fsm-hidden');
+      container.style.setProperty('display', 'none', 'important');
     } else {
-      container.style.display = 'block';
+      container.classList.remove('fsm-hidden');
+      container.style.setProperty('display', 'block', 'important');
     }
 
     if (state.minimized) {
@@ -1371,15 +1373,37 @@
     };
   }
 
+  function applyHudVisibility(visible) {
+    state.hudVisible = visible !== false;
+    const hud = document.getElementById('fyers-scalpmaster-hud');
+    if (hud) {
+      if (state.hudVisible) {
+        hud.classList.remove('fsm-hidden');
+        hud.style.setProperty('display', 'block', 'important');
+      } else {
+        hud.classList.add('fsm-hidden');
+        hud.style.setProperty('display', 'none', 'important');
+      }
+    }
+  }
+
+  // Listen for storage changes across all tabs/popup
+  if (chrome && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes[STATE_KEY]) {
+        const newVal = changes[STATE_KEY].newValue;
+        if (newVal && newVal.hudVisible !== undefined) {
+          applyHudVisibility(newVal.hudVisible);
+        }
+      }
+    });
+  }
+
   // Chrome Runtime Message Listener for Extension Popup
   if (chrome && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
       if (req.action === 'SET_HUD_VISIBILITY') {
-        const hud = document.getElementById('fyers-scalpmaster-hud');
-        state.hudVisible = req.visible !== false;
-        if (hud) {
-          hud.style.display = state.hudVisible ? 'block' : 'none';
-        }
+        applyHudVisibility(req.visible);
         saveState();
         sendResponse({ success: true, visible: state.hudVisible });
       } else if (req.action === 'RESET_STATE') {
