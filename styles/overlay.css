@@ -1,8 +1,8 @@
 /* FYERS ScalpMaster - Floating Practice Terminal Overlay */
 :root {
-  --fsm-bg: rgba(15, 23, 42, 0.92);
-  --fsm-card-bg: rgba(30, 41, 59, 0.7);
-  --fsm-border: rgba(51, 65, 85, 0.8);
+  --fsm-bg: rgba(15, 23, 42, 0.94);
+  --fsm-card-bg: rgba(30, 41, 59, 0.75);
+  --fsm-border: rgba(51, 65, 85, 0.85);
   --fsm-text: #f8fafc;
   --fsm-text-muted: #94a3b8;
   --fsm-green: #10b981;
@@ -19,7 +19,7 @@
   position: fixed;
   top: 70px;
   right: 25px;
-  width: 340px;
+  width: 350px;
   background: var(--fsm-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -71,6 +71,7 @@
   padding: 2px 6px;
   border-radius: 4px;
   text-transform: uppercase;
+  cursor: pointer;
 }
 
 .fsm-badge-practice {
@@ -113,8 +114,8 @@
   padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: 580px;
+  gap: 10px;
+  max-height: 600px;
   overflow-y: auto;
 }
 
@@ -132,19 +133,33 @@
   justify-content: space-between;
   align-items: center;
   background: var(--fsm-card-bg);
-  padding: 8px 12px;
+  padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fsm-symbol-info {
+  display: flex;
+  flex-direction: column;
+  max-width: 190px;
 }
 
 .fsm-symbol-name {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 13px;
-  color: #f1f5f9;
-  max-width: 170px;
+  color: #38bdf8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.fsm-symbol-desc {
+  font-size: 10px;
+  color: var(--fsm-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
 }
 
 .fsm-ltp-box {
@@ -154,16 +169,25 @@
 }
 
 .fsm-ltp-val {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 800;
   font-family: monospace;
-  color: #38bdf8;
+  color: #fff;
   letter-spacing: 0.5px;
+  transition: color 0.2s;
+}
+
+.fsm-uptick {
+  color: #34d399 !important;
+}
+
+.fsm-downtick {
+  color: #f87171 !important;
 }
 
 /* Overall Day PnL Box */
 .fsm-day-pnl-card {
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95));
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   padding: 10px 14px;
@@ -171,11 +195,11 @@
 }
 
 .fsm-day-pnl-label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--fsm-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .fsm-day-pnl-value {
@@ -188,12 +212,12 @@
 
 .fsm-pnl-positive {
   color: #34d399 !important;
-  text-shadow: 0 0 12px rgba(52, 211, 153, 0.3);
+  text-shadow: 0 0 12px rgba(52, 211, 153, 0.35);
 }
 
 .fsm-pnl-negative {
   color: #f87171 !important;
-  text-shadow: 0 0 12px rgba(248, 113, 113, 0.3);
+  text-shadow: 0 0 12px rgba(248, 113, 113, 0.35);
 }
 
 .fsm-stats-grid {
@@ -212,7 +236,7 @@
 }
 
 .fsm-stat-label {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--fsm-text-muted);
 }
 
@@ -222,46 +246,94 @@
   margin-top: 2px;
 }
 
-/* Order Execution Controls */
+/* Lot Size & Quantity Controls */
 .fsm-order-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.fsm-qty-bar {
+.fsm-lot-control-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.fsm-qty-input {
-  flex: 1;
-  background: #0f172a;
-  border: 1px solid var(--fsm-border);
-  border-radius: 6px;
-  color: #fff;
-  padding: 6px 10px;
-  font-size: 13px;
-  font-weight: 600;
-  text-align: center;
-}
-
-.fsm-qty-btn {
+  justify-content: space-between;
   background: var(--fsm-card-bg);
   border: 1px solid var(--fsm-border);
-  color: var(--fsm-text);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.fsm-lot-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fsm-step-btn {
+  background: #334155;
+  color: #fff;
+  border: 1px solid #475569;
   border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 11px;
+  width: 32px;
+  height: 30px;
+  font-size: 16px;
+  font-weight: 700;
   cursor: pointer;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.15s;
 }
 
-.fsm-qty-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+.fsm-step-btn:hover {
+  background: #475569;
   border-color: #64748b;
+}
+
+.fsm-step-btn:active {
+  transform: scale(0.95);
+}
+
+.fsm-lot-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 120px;
+}
+
+.fsm-lot-count {
+  font-weight: 800;
+  font-size: 13px;
+  color: #f1f5f9;
+}
+
+.fsm-total-qty {
+  font-size: 11px;
+  color: var(--fsm-accent);
+  font-weight: 600;
+}
+
+.fsm-lot-multipliers {
+  display: flex;
+  gap: 4px;
+}
+
+.fsm-mult-btn {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--fsm-border);
+  color: var(--fsm-text-muted);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.fsm-mult-btn:hover, .fsm-mult-btn.active {
+  background: var(--fsm-accent);
+  color: #0f172a;
+  border-color: var(--fsm-accent);
 }
 
 .fsm-trade-btns {
@@ -278,16 +350,16 @@
   padding: 10px 8px;
   border-radius: 8px;
   border: none;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 13px;
   cursor: pointer;
   color: #fff;
   transition: all 0.15s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 .fsm-btn:active {
-  transform: translateY(1px) scale(0.98);
+  transform: translateY(1px) scale(0.97);
 }
 
 .fsm-btn-buy {
@@ -296,7 +368,7 @@
 
 .fsm-btn-buy:hover {
   background: linear-gradient(135deg, #34d399, #10b981);
-  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.45);
 }
 
 .fsm-btn-sell {
@@ -305,14 +377,14 @@
 
 .fsm-btn-sell:hover {
   background: linear-gradient(135deg, #f87171, #ef4444);
-  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.45);
 }
 
 .fsm-btn-sub {
   font-size: 10px;
-  opacity: 0.8;
+  opacity: 0.85;
   margin-top: 2px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .fsm-action-strip {
@@ -327,7 +399,7 @@
   border: none;
   border-radius: 6px;
   padding: 8px;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
@@ -338,9 +410,10 @@
 }
 
 .fsm-btn-exit:disabled {
-  background: #475569;
-  color: #94a3b8;
+  background: #334155;
+  color: #64748b;
   cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .fsm-btn-reverse {
@@ -349,7 +422,7 @@
   border: none;
   border-radius: 6px;
   padding: 8px;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
@@ -360,9 +433,10 @@
 }
 
 .fsm-btn-reverse:disabled {
-  background: #475569;
-  color: #94a3b8;
+  background: #334155;
+  color: #64748b;
   cursor: not-allowed;
+  opacity: 0.6;
 }
 
 /* Active Live Position Card */
@@ -402,7 +476,7 @@
 }
 
 .fsm-position-pnl {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 800;
   font-family: monospace;
 }
@@ -421,6 +495,9 @@
   color: var(--fsm-text-muted);
   font-size: 12px;
   padding: 12px 0;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 6px;
+  border: 1px dashed var(--fsm-border);
 }
 
 /* Tabs & Orders List */
@@ -475,7 +552,7 @@
 /* Minimized HUD pill */
 .fsm-minimized {
   width: auto !important;
-  min-width: 180px;
+  min-width: 200px;
 }
 .fsm-minimized .fsm-body {
   display: none !important;
@@ -487,7 +564,7 @@
   bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(15, 23, 42, 0.98);
   border: 1px solid var(--fsm-accent);
   color: #fff;
   padding: 6px 14px;
@@ -498,7 +575,8 @@
   opacity: 0;
   transition: opacity 0.25s;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  z-index: 1000;
 }
 .fsm-toast.show {
   opacity: 1;

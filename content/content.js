@@ -1,22 +1,28 @@
 /**
- * FYERS ScalpMaster - Practice & Live Scalping HUD
+ * FYERS ScalpMaster - Practice & Scalping HUD
  * Injected into trade.fyers.in
  */
 
 (function () {
-  if (window.__fyers_scalpmaster_injected) return;
-  window.__fyers_scalpmaster_injected = true;
+  // Prevent duplicate instances
+  if (window.__fyers_scalpmaster_initialized) {
+    console.log('[ScalpMaster] Re-initializing existing instance...');
+  }
+  window.__fyers_scalpmaster_initialized = true;
 
-  // Configuration & Persistent State
-  const STATE_KEY = 'fsm_state_v1';
+  const STATE_KEY = 'fsm_state_v2';
+
   let state = {
     mode: 'PRACTICE', // 'PRACTICE' or 'LIVE_DOM'
     activeTab: 'position', // 'position' or 'history'
-    qty: 25,
-    symbol: 'NIFTY 50',
-    ltp: 24500.00,
-    isManualTicker: false,
-    activePosition: null, // { symbol, side: 'BUY'|'SELL', qty: 25, entryPrice: 24500.00, time: '' }
+    symbol: 'WAITING FOR CHART...',
+    symbolDesc: '',
+    lotSize: 1,
+    lots: 1,
+    qty: 1,
+    ltp: 0.00,
+    prevLtp: 0.00,
+    activePosition: null, // { symbol, side: 'BUY'|'SELL', qty: 25, entryPrice: 63.75, time: '' }
     completedTrades: [],
     dayStats: {
       totalPnL: 0,
@@ -27,16 +33,25 @@
       peakPnL: 0,
       maxDrawdown: 0
     },
-    hudPosition: { top: 70, right: 25 },
     minimized: false,
     soundEnabled: true
   };
 
-  // Web Audio Synthesizer for Scalping Chimes
-  const audioCtx = window.AudioContext ? new (window.AudioContext || window.webkitAudioContext)() : null;
+  // Web Audio Synthesizer
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx && AudioContextClass) {
+      audioCtx = new AudioContextClass();
+    }
+  }
+
   function playSound(type) {
-    if (!state.soundEnabled || !audioCtx) return;
+    if (!state.soundEnabled) return;
     try {
+      initAudio();
+      if (!audioCtx) return;
       if (audioCtx.state === 'suspended') {
         audioCtx.resume();
       }
@@ -86,7 +101,15 @@
     if (chrome && chrome.storage && chrome.storage.local) {
       chrome.storage.local.get([STATE_KEY], (res) => {
         if (res && res[STATE_KEY]) {
-          state = { ...state, ...res[STATE_KEY] };
+          const saved = res[STATE_KEY];
+          // Preserve dynamic symbol/LTP from DOM
+          state.dayStats = saved.dayStats || state.dayStats;
+          state.completedTrades = saved.completedTrades || [];
+          state.activePosition = saved.activePosition || null;
+          state.lots = saved.lots || 1;
+          state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
+          state.minimized = !!saved.minimized;
+          state.mode = saved.mode || 'PRACTICE';
           renderHUD();
         }
       });
@@ -100,7 +123,7 @@
     }
   }
 
-  // Show floating toast
+  // Toast Notification
   function showToast(msg) {
     const toast = document.getElementById('fsm-toast');
     if (!toast) return;
@@ -108,70 +131,191 @@
     toast.classList.add('show');
     setTimeout(() => {
       toast.classList.remove('show');
-    }, 2000);
+    }, 2200);
   }
 
-  // Intelligent Price & Symbol Scraper from FYERS Web DOM
-  function scrapeFyersMarketData() {
-    // 1. Try to find symbol from header or chart title
-    const symbolSelectors = [
-      '.header-script-details .symbol-name',
-      '.symbol-title',
-      '[class*="symbolName"]',
-      '[class*="tickerText"]',
-      '.header-title',
-      '.symbol-header',
-      'div[class*="header"] [class*="symbol"]'
-    ];
-    for (const sel of symbolSelectors) {
-      const el = document.querySelector(sel);
-      if (el && el.innerText && el.innerText.trim().length > 1) {
-        state.symbol = el.innerText.trim();
-        break;
+  // Access TradingView Iframe Document
+  function getTvIframeDocument() {
+    const iframes = document.querySelectorAll('iframe');
+    for (const f of iframes) {
+      if (f.id && f.id.startsWith('tradingview')) {
+        try {
+          if (f.contentDocument && f.contentDocument.body) {
+            return f.contentDocument;
+          }
+        } catch (e) {}
+      }
+    }
+    return null;
+  }
+
+  // Query FYERS Local IndexedDB for Master Contract Details
+  function querySymbolIndexedDB(symbolKey) {
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open('symbol_data');
+        req.onsuccess = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('symbols')) {
+            return resolve(null);
+          }
+          const tx = db.transaction('symbols', 'readonly');
+          const store = tx.objectStore('symbols');
+
+          const keysToTry = [
+            symbolKey,
+            'NSE:' + symbolKey,
+            'BSE:' + symbolKey,
+            'MCX:' + symbolKey
+          ];
+
+          function tryLookup(idx) {
+            if (idx >= keysToTry.length) return resolve(null);
+            const getReq = store.get(keysToTry[idx]);
+            getReq.onsuccess = () => {
+              if (getReq.result && getReq.result.lot_size) {
+                resolve(getReq.result);
+              } else {
+                tryLookup(idx + 1);
+              }
+            };
+            getReq.onerror = () => tryLookup(idx + 1);
+          }
+          tryLookup(0);
+        };
+        req.onerror = () => resolve(null);
+      } catch (err) {
+        resolve(null);
+      }
+    });
+  }
+
+  // Fallback Heuristic for Indian Futures & Options Lot Sizes
+  function inferLotSize(symbol) {
+    const s = symbol.toUpperCase();
+    if (s.includes('BANKNIFTY')) return 15;
+    if (s.includes('FINNIFTY')) return 25;
+    if (s.includes('MIDCPNIFTY')) return 50;
+    if (s.includes('NIFTY') && (s.includes('PE') || s.includes('CE') || s.includes('FUT'))) return 65;
+    if (s.includes('SENSEX')) return 10;
+    if (s.includes('BANKEX')) return 15;
+    if (s.includes('CRUDEOIL')) return 100;
+    if (s.includes('NATURALGAS')) return 1250;
+    return 1; // Default for equity/cash shares
+  }
+
+  // Update Instrument & Determine Lot Size
+  let lastCheckedSymbol = '';
+  async function handleSymbolUpdate(newSymbol) {
+    if (!newSymbol || newSymbol === lastCheckedSymbol) return;
+    lastCheckedSymbol = newSymbol;
+    state.symbol = newSymbol;
+
+    // 1. Fetch exact lot size and description from FYERS IndexedDB
+    const dbRecord = await querySymbolIndexedDB(newSymbol);
+    if (dbRecord && dbRecord.lot_size) {
+      state.lotSize = dbRecord.lot_size;
+      state.symbolDesc = dbRecord.description || dbRecord.short_name || '';
+    } else {
+      state.lotSize = inferLotSize(newSymbol);
+      state.symbolDesc = newSymbol.includes('PE') ? 'Put Option' : newSymbol.includes('CE') ? 'Call Option' : 'Instrument';
+    }
+
+    // Adjust total quantity based on lots
+    state.qty = state.lots * state.lotSize;
+
+    // Update Symbol DOM elements
+    const symEl = document.querySelector('.fsm-symbol-name');
+    if (symEl) {
+      symEl.textContent = state.symbol;
+      symEl.title = state.symbol;
+    }
+    const descEl = document.querySelector('.fsm-symbol-desc');
+    if (descEl) {
+      descEl.textContent = state.symbolDesc;
+    }
+    updateLotDisplay();
+  }
+
+  // Real-Time Scraping: Document Title & TradingView Iframe
+  function scrapeActiveMarketData() {
+    let detectedPrice = null;
+    let detectedSymbol = null;
+
+    // Method 1: Check document.title (fastest, real-time ticks from FYERS Web)
+    // Format: "63.75 ▼ (-51.70%) NIFTY26N0322600PE" or "24,510.50 ▲ (+0.45%) NIFTY50-INDEX"
+    const title = document.title || '';
+    const titleMatch = title.match(/^([\d,]+(?:\.\d+)?)\s*(?:[▲▼]\s*)?(?:\([+-]?[0-9.,]*%\)\s*)?([A-Za-z0-9_\-]+)/);
+    if (titleMatch) {
+      const p = parseFloat(titleMatch[1].replace(/,/g, ''));
+      if (!isNaN(p) && p > 0) {
+        detectedPrice = p;
+        detectedSymbol = titleMatch[2].trim();
       }
     }
 
-    // 2. Try to find LTP (Last Traded Price) from FYERS DOM
-    const ltpSelectors = [
-      '.header-script-details [class*="ltp"]',
-      '[class*="header-ltp"]',
-      '[class*="current-price"]',
-      '[class*="lastPrice"]',
-      '.symbol-ltp',
-      '[data-field="ltp"]',
-      '.header-price'
-    ];
-    let detectedLtp = null;
-    for (const sel of ltpSelectors) {
-      const el = document.querySelector(sel);
-      if (el && el.innerText) {
-        const raw = el.innerText.replace(/,/g, '').trim();
-        const match = raw.match(/([0-9]+\.[0-9]{2})/);
-        if (match) {
-          const val = parseFloat(match[1]);
-          if (!isNaN(val) && val > 0) {
-            detectedLtp = val;
-            break;
+    // Method 2: Check TradingView Iframe
+    const tvDoc = getTvIframeDocument();
+    if (tvDoc) {
+      const activeChart = tvDoc.querySelector('.chart-container.active') || tvDoc.querySelector('.chart-container');
+      if (activeChart) {
+        // Symbol from Chart
+        if (!detectedSymbol) {
+          const symBtn = activeChart.querySelector('.js-button-text') || activeChart.querySelector('button[class*="title-"]');
+          if (symBtn && symBtn.innerText && symBtn.innerText.trim()) {
+            detectedSymbol = symBtn.innerText.trim();
+          }
+        }
+        // Price from Buy/Sell Buttons or Legend
+        if (!detectedPrice) {
+          const buyBtnPrice = activeChart.querySelector('[data-name="buy-order-button"] .buttonText-hw_3o_pb');
+          if (buyBtnPrice && buyBtnPrice.innerText) {
+            const bp = parseFloat(buyBtnPrice.innerText.replace(/,/g, '').trim());
+            if (!isNaN(bp) && bp > 0) detectedPrice = bp;
           }
         }
       }
     }
 
-    // If FYERS live market price is detected, update state.ltp
-    if (detectedLtp !== null) {
-      state.ltp = detectedLtp;
-      state.isManualTicker = false;
-    } else if (!state.isManualTicker && (!state.ltp || state.ltp === 24500)) {
-      // Off-market simulation / initial default price
-      state.ltp = 24500.00;
+    // Apply detected Symbol
+    if (detectedSymbol && detectedSymbol !== state.symbol) {
+      handleSymbolUpdate(detectedSymbol);
+    }
+
+    // Apply detected Price
+    if (detectedPrice !== null) {
+      state.prevLtp = state.ltp;
+      state.ltp = detectedPrice;
+      renderLtpTick();
     }
 
     updatePnLDisplay();
   }
 
-  // Calculate Unrealized PnL
+  // Render LTP with Uptick/Downtick Flashes
+  function renderLtpTick() {
+    const ltpEl = document.getElementById('fsm-ltp-val');
+    if (!ltpEl) return;
+
+    ltpEl.textContent = '₹' + state.ltp.toFixed(2);
+
+    if (state.prevLtp > 0 && state.ltp !== state.prevLtp) {
+      if (state.ltp > state.prevLtp) {
+        ltpEl.classList.remove('fsm-downtick');
+        ltpEl.classList.add('fsm-uptick');
+      } else {
+        ltpEl.classList.remove('fsm-uptick');
+        ltpEl.classList.add('fsm-downtick');
+      }
+      setTimeout(() => {
+        ltpEl.classList.remove('fsm-uptick', 'fsm-downtick');
+      }, 300);
+    }
+  }
+
+  // Calculate Unrealized PnL of Open Position
   function calculateCurrentPnL() {
-    if (!state.activePosition) return { pnl: 0, points: 0 };
+    if (!state.activePosition || !state.ltp) return { pnl: 0, points: 0 };
     const currentPrice = state.ltp;
     const entryPrice = state.activePosition.entryPrice;
     const qty = state.activePosition.qty;
@@ -186,38 +330,81 @@
     return { pnl, points };
   }
 
-  // Execute Order
-  function executeOrder(side) {
-    const qty = parseInt(state.qty, 10) || 25;
-    const price = state.ltp;
-    const nowStr = new Date().toLocaleTimeString();
+  // Update Dynamic PnL Display
+  function updatePnLDisplay() {
+    const { pnl, points } = calculateCurrentPnL();
+    const totalDayPnL = state.dayStats.totalPnL + pnl;
 
-    // If in Live FYERS DOM mode, trigger FYERS DOM buttons
-    if (state.mode === 'LIVE_DOM') {
-      triggerFyersDOMOrder(side, qty);
+    // Day PnL Element
+    const dayPnlEl = document.getElementById('fsm-day-pnl-val');
+    if (dayPnlEl) {
+      const sign = totalDayPnL >= 0 ? '+' : '';
+      dayPnlEl.textContent = `${sign}₹${totalDayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      dayPnlEl.className = 'fsm-day-pnl-value ' + (totalDayPnL > 0 ? 'fsm-pnl-positive' : totalDayPnL < 0 ? 'fsm-pnl-negative' : '');
     }
 
-    // Practice / Scalp Tracking logic
+    // Active Position Live PnL
+    const activePnlEl = document.getElementById('fsm-active-pnl-val');
+    if (activePnlEl && state.activePosition) {
+      const sign = pnl >= 0 ? '+' : '';
+      activePnlEl.textContent = `${sign}₹${pnl.toFixed(2)} (${points >= 0 ? '+' : ''}${points.toFixed(2)} pts)`;
+      activePnlEl.className = 'fsm-position-pnl ' + (pnl > 0 ? 'fsm-pnl-positive' : pnl < 0 ? 'fsm-pnl-negative' : '');
+    }
+  }
+
+  // Update Lot Stepper Display
+  function updateLotDisplay() {
+    const lotCountEl = document.getElementById('fsm-lot-count');
+    const totalQtyEl = document.getElementById('fsm-total-qty');
+    if (lotCountEl) {
+      lotCountEl.textContent = `${state.lots} Lot${state.lots > 1 ? 's' : ''}`;
+    }
+    if (totalQtyEl) {
+      totalQtyEl.textContent = `(${state.qty} Qty @ Lot ${state.lotSize})`;
+    }
+    // Update multiplier pill active states
+    document.querySelectorAll('.fsm-mult-btn').forEach(btn => {
+      const m = parseInt(btn.dataset.mult, 10);
+      if (m === state.lots) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+
+  // Execute Order (BUY / SELL)
+  function executeOrder(side) {
+    initAudio();
+    const currentPrice = state.ltp > 0 ? state.ltp : 100.00;
+    const qty = state.qty > 0 ? state.qty : state.lotSize;
+    const nowStr = new Date().toLocaleTimeString();
+
+    // Live DOM Trigger Mode
+    if (state.mode === 'LIVE_DOM') {
+      triggerFyersDOMOrder(side);
+    }
+
+    // Practice Execution
     if (state.activePosition) {
       if (state.activePosition.side === side) {
-        // Adding to existing position
+        // Add to existing position
         const totalQty = state.activePosition.qty + qty;
-        const avgPrice = ((state.activePosition.entryPrice * state.activePosition.qty) + (price * qty)) / totalQty;
+        const avgPrice = ((state.activePosition.entryPrice * state.activePosition.qty) + (currentPrice * qty)) / totalQty;
         state.activePosition.qty = totalQty;
         state.activePosition.entryPrice = parseFloat(avgPrice.toFixed(2));
-        showToast(`Added ${qty} to ${side} @ ₹${price.toFixed(2)}`);
+        showToast(`Added ${qty} to ${side} @ ₹${currentPrice.toFixed(2)}`);
       } else {
-        // Reverse or partial close
+        // Reverse
         closeActivePosition();
-        // Now open new opposite
         state.activePosition = {
           symbol: state.symbol,
           side: side,
           qty: qty,
-          entryPrice: price,
+          entryPrice: currentPrice,
           time: nowStr
         };
-        showToast(`Reversed to ${side} ${qty} @ ₹${price.toFixed(2)}`);
+        showToast(`Reversed to ${side} ${qty} @ ₹${currentPrice.toFixed(2)}`);
         playSound(side);
       }
     } else {
@@ -226,10 +413,10 @@
         symbol: state.symbol,
         side: side,
         qty: qty,
-        entryPrice: price,
+        entryPrice: currentPrice,
         time: nowStr
       };
-      showToast(`${side} ${qty} ${state.symbol} @ ₹${price.toFixed(2)}`);
+      showToast(`${side} ${qty} ${state.symbol} @ ₹${currentPrice.toFixed(2)}`);
       playSound(side);
     }
 
@@ -240,8 +427,9 @@
   // Close Active Position (Exit / Square Off)
   function closeActivePosition() {
     if (!state.activePosition) return;
+    initAudio();
 
-    const exitPrice = state.ltp;
+    const exitPrice = state.ltp > 0 ? state.ltp : state.activePosition.entryPrice;
     const { pnl, points } = calculateCurrentPnL();
     const nowStr = new Date().toLocaleTimeString();
 
@@ -259,7 +447,6 @@
       isWin: pnl > 0
     };
 
-    // Update Day Stats
     state.completedTrades.unshift(trade);
     state.dayStats.totalTrades += 1;
     state.dayStats.totalPnL = parseFloat((state.dayStats.totalPnL + pnl).toFixed(2));
@@ -299,46 +486,42 @@
     executeOrder(oppositeSide);
   }
 
-  // DOM Automation for FYERS Web Order Placement
-  function triggerFyersDOMOrder(side, qty) {
+  // Trigger FYERS Native TradingView Buttons in Iframe
+  function triggerFyersDOMOrder(side) {
     try {
-      // Find TradingView / FYERS Buy or Sell buttons on page
-      const buySelectors = [
-        'button[data-name="buy"]',
-        '.buy-btn',
-        'button.btn-buy',
-        '[class*="buy-button"]'
-      ];
-      const sellSelectors = [
-        'button[data-name="sell"]',
-        '.sell-btn',
-        'button.btn-sell',
-        '[class*="sell-button"]'
-      ];
-
-      const targetSelectors = side === 'BUY' ? buySelectors : sellSelectors;
-      let clicked = false;
-      for (const sel of targetSelectors) {
-        const btn = document.querySelector(sel);
-        if (btn) {
-          btn.click();
-          clicked = true;
-          break;
+      const tvDoc = getTvIframeDocument();
+      if (tvDoc) {
+        const activeChart = tvDoc.querySelector('.chart-container.active') || tvDoc.querySelector('.chart-container');
+        if (activeChart) {
+          const btn = side === 'BUY'
+            ? activeChart.querySelector('[data-name="buy-order-button"]')
+            : activeChart.querySelector('[data-name="sell-order-button"]');
+          if (btn) {
+            btn.click();
+            showToast(`[DOM Mode] Clicked TradingView ${side} Button`);
+            return;
+          }
         }
       }
-      if (clicked) {
-        showToast(`[DOM Trigger] Clicked FYERS ${side} Button`);
+
+      // Check Top DOM Order Window
+      const topBtn = side === 'BUY'
+        ? document.querySelector('#buyButton, button.buy-button, .buy-btn')
+        : document.querySelector('#sellButton, button.sell-button, .sell-btn');
+      if (topBtn) {
+        topBtn.click();
+        showToast(`[DOM Mode] Clicked FYERS ${side} Button`);
       } else {
-        showToast(`[DOM Trigger] Buy/Sell button not found in current view`);
+        showToast(`[DOM Mode] Instant order button not visible on chart`);
       }
     } catch (e) {
-      console.error('[ScalpMaster] DOM Trigger Error:', e);
+      console.error('[ScalpMaster] DOM Order Trigger Error:', e);
     }
   }
 
-  // Reset Today's Journal & Stats
+  // Reset Today's Stats
   function resetDayStats() {
-    if (confirm("Reset today's practice P&L, completed trades, and statistics?")) {
+    if (confirm("Reset today's practice statistics and completed trade log?")) {
       state.activePosition = null;
       state.completedTrades = [];
       state.dayStats = {
@@ -356,34 +539,7 @@
     }
   }
 
-  // Update Dynamic PnL Values without full DOM rerender (smooth 60fps)
-  function updatePnLDisplay() {
-    const ltpEl = document.getElementById('fsm-ltp-val');
-    if (ltpEl) {
-      ltpEl.textContent = '₹' + state.ltp.toFixed(2);
-    }
-
-    const { pnl, points } = calculateCurrentPnL();
-    const totalDayPnL = state.dayStats.totalPnL + pnl;
-
-    // Day PnL Element
-    const dayPnlEl = document.getElementById('fsm-day-pnl-val');
-    if (dayPnlEl) {
-      const sign = totalDayPnL >= 0 ? '+' : '';
-      dayPnlEl.textContent = `${sign}₹${totalDayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      dayPnlEl.className = 'fsm-day-pnl-value ' + (totalDayPnL > 0 ? 'fsm-pnl-positive' : totalDayPnL < 0 ? 'fsm-pnl-negative' : '');
-    }
-
-    // Active Position Live PnL
-    const activePnlEl = document.getElementById('fsm-active-pnl-val');
-    if (activePnlEl && state.activePosition) {
-      const sign = pnl >= 0 ? '+' : '';
-      activePnlEl.textContent = `${sign}₹${pnl.toFixed(2)} (${points >= 0 ? '+' : ''}${points.toFixed(2)} pts)`;
-      activePnlEl.className = 'fsm-position-pnl ' + (pnl > 0 ? 'fsm-pnl-positive' : pnl < 0 ? 'fsm-pnl-negative' : '');
-    }
-  }
-
-  // Build & Render the Floating HUD DOM
+  // Build & Render HUD
   function renderHUD() {
     let container = document.getElementById('fyers-scalpmaster-hud');
     if (!container) {
@@ -407,26 +563,29 @@
       <div class="fsm-header" id="fsm-drag-handle">
         <div class="fsm-title">
           <span>⚡ ScalpMaster</span>
-          <span class="fsm-badge ${state.mode === 'PRACTICE' ? 'fsm-badge-practice' : 'fsm-badge-live'}" id="fsm-toggle-mode" title="Click to switch Practice / Live Mode">
+          <span class="fsm-badge ${state.mode === 'PRACTICE' ? 'fsm-badge-practice' : 'fsm-badge-live'}" id="fsm-toggle-mode" title="Click to toggle Practice / Live DOM Mode">
             ${state.mode === 'PRACTICE' ? 'PRACTICE' : 'LIVE DOM'}
           </span>
         </div>
         <div class="fsm-controls">
-          <button class="fsm-icon-btn" id="fsm-sound-btn" title="Toggle Audio">${state.soundEnabled ? '🔔' : '🔕'}</button>
+          <button class="fsm-icon-btn" id="fsm-sound-btn" title="Toggle Sound">${state.soundEnabled ? '🔔' : '🔕'}</button>
           <button class="fsm-icon-btn" id="fsm-min-btn" title="Minimize / Expand">${state.minimized ? '🗖' : '🗕'}</button>
         </div>
       </div>
 
       <div class="fsm-body">
-        <!-- Live Ticker Bar -->
+        <!-- Instrument & Real-time Live Price Strip -->
         <div class="fsm-quote-strip">
-          <div class="fsm-symbol-name" title="${state.symbol}">${state.symbol}</div>
+          <div class="fsm-symbol-info">
+            <span class="fsm-symbol-name" title="${state.symbol}">${state.symbol}</span>
+            <span class="fsm-symbol-desc">${state.symbolDesc || 'Live Chart Instrument'}</span>
+          </div>
           <div class="fsm-ltp-box">
             <span class="fsm-ltp-val" id="fsm-ltp-val">₹${state.ltp.toFixed(2)}</span>
           </div>
         </div>
 
-        <!-- Overall Day PnL Summary -->
+        <!-- Day Net P&L Summary -->
         <div class="fsm-day-pnl-card">
           <div class="fsm-day-pnl-label">Day Net P&amp;L (Live + Realized)</div>
           <div class="fsm-day-pnl-value ${totalDayPnL > 0 ? 'fsm-pnl-positive' : totalDayPnL < 0 ? 'fsm-pnl-negative' : ''}" id="fsm-day-pnl-val">
@@ -448,17 +607,27 @@
           </div>
         </div>
 
-        <!-- Scalping Execution Controls -->
+        <!-- Lot Size Stepper Controls (+ / -) -->
         <div class="fsm-order-section">
-          <div class="fsm-qty-bar">
-            <span style="font-size: 11px; color: var(--fsm-text-muted); font-weight: 600;">QTY:</span>
-            <input type="number" id="fsm-qty-input" class="fsm-qty-input" value="${state.qty}" min="1" step="1">
-            <button class="fsm-qty-btn" data-qty="25">25</button>
-            <button class="fsm-qty-btn" data-qty="50">50</button>
-            <button class="fsm-qty-btn" data-qty="75">75</button>
-            <button class="fsm-qty-btn" data-qty="100">100</button>
+          <div class="fsm-lot-control-row">
+            <div class="fsm-lot-stepper">
+              <button class="fsm-step-btn" id="fsm-lot-minus" title="Decrease 1 Lot">−</button>
+              <div class="fsm-lot-summary">
+                <span class="fsm-lot-count" id="fsm-lot-count">${state.lots} Lot${state.lots > 1 ? 's' : ''}</span>
+                <span class="fsm-total-qty" id="fsm-total-qty">(${state.qty} Qty @ Lot ${state.lotSize})</span>
+              </div>
+              <button class="fsm-step-btn" id="fsm-lot-plus" title="Increase 1 Lot">+</button>
+            </div>
+            <div class="fsm-lot-multipliers">
+              <button class="fsm-mult-btn ${state.lots === 1 ? 'active' : ''}" data-mult="1">1x</button>
+              <button class="fsm-mult-btn ${state.lots === 2 ? 'active' : ''}" data-mult="2">2x</button>
+              <button class="fsm-mult-btn ${state.lots === 3 ? 'active' : ''}" data-mult="3">3x</button>
+              <button class="fsm-mult-btn ${state.lots === 5 ? 'active' : ''}" data-mult="5">5x</button>
+              <button class="fsm-mult-btn ${state.lots === 10 ? 'active' : ''}" data-mult="10">10x</button>
+            </div>
           </div>
 
+          <!-- BUY & SELL Execution Buttons -->
           <div class="fsm-trade-btns">
             <button class="fsm-btn fsm-btn-buy" id="fsm-buy-btn">
               <span>BUY / LONG</span>
@@ -470,6 +639,7 @@
             </button>
           </div>
 
+          <!-- SQUARE OFF & REVERSE Buttons -->
           <div class="fsm-action-strip">
             <button class="fsm-btn-exit" id="fsm-exit-btn" ${!state.activePosition ? 'disabled' : ''}>
               SQUARE OFF [Shift + X]
@@ -480,19 +650,19 @@
           </div>
         </div>
 
-        <!-- Navigation Tabs: Position vs Trade History -->
+        <!-- Navigation Tabs: Active Position vs Trade Log -->
         <div class="fsm-tab-nav">
           <div class="fsm-tab ${state.activeTab === 'position' ? 'active' : ''}" id="fsm-tab-pos">Active Position</div>
           <div class="fsm-tab ${state.activeTab === 'history' ? 'active' : ''}" id="fsm-tab-hist">Trade Log (${state.completedTrades.length})</div>
         </div>
 
-        <!-- Active Position Card -->
+        <!-- Tab 1: Active Position Card -->
         <div id="fsm-tab-content-pos" style="display: ${state.activeTab === 'position' ? 'block' : 'none'};">
           ${state.activePosition ? `
             <div class="fsm-position-card">
               <div class="fsm-position-header">
                 <span class="fsm-pos-type ${state.activePosition.side === 'BUY' ? 'fsm-type-long' : 'fsm-type-short'}">
-                  ${state.activePosition.side} ${state.activePosition.qty} Qty
+                  ${state.activePosition.side} ${state.activePosition.qty} Qty (${state.activePosition.symbol})
                 </span>
                 <span style="color: var(--fsm-text-muted);">${state.activePosition.time}</span>
               </div>
@@ -509,7 +679,7 @@
           `}
         </div>
 
-        <!-- Completed Orders / History -->
+        <!-- Tab 2: Trade Log & History -->
         <div id="fsm-tab-content-hist" style="display: ${state.activeTab === 'history' ? 'block' : 'none'};">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
             <span style="font-size: 11px; color: var(--fsm-text-muted);">Completed Scalps Today</span>
@@ -517,15 +687,18 @@
           </div>
           <div class="fsm-orders-list">
             ${state.completedTrades.length === 0 ? `
-              <div style="text-align: center; color: var(--fsm-text-muted); padding: 12px; font-size: 11px;">No completed scalps today yet.</div>
+              <div style="text-align: center; color: var(--fsm-text-muted); padding: 12px; font-size: 11px;">No completed scalps yet.</div>
             ` : state.completedTrades.map(t => `
               <div class="fsm-order-row">
-                <div style="display: flex; align-items: center; gap: 6px;">
-                  <span class="fsm-order-side ${t.side === 'BUY' ? 'fsm-type-long' : 'fsm-type-short'}">${t.side}</span>
-                  <span>${t.qty} @ ₹${t.entryPrice.toFixed(1)}</span>
+                <div style="display: flex; flex-direction: column;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span class="fsm-order-side ${t.side === 'BUY' ? 'fsm-type-long' : 'fsm-type-short'}">${t.side}</span>
+                    <span style="font-weight: 600;">${t.qty} @ ₹${t.entryPrice.toFixed(2)}</span>
+                  </div>
+                  <span style="font-size: 9px; color: var(--fsm-text-muted);">${t.symbol}</span>
                 </div>
                 <div style="text-align: right;">
-                  <div style="font-weight: 700; color: ${t.pnl >= 0 ? '#34d399' : '#f87171'};">
+                  <div style="font-weight: 800; color: ${t.pnl >= 0 ? '#34d399' : '#f87171'};">
                     ${t.pnl >= 0 ? '+' : ''}₹${t.pnl.toFixed(2)}
                   </div>
                   <div style="font-size: 9px; color: var(--fsm-text-muted);">${t.points >= 0 ? '+' : ''}${t.points} pts (${t.exitTime})</div>
@@ -543,14 +716,14 @@
     updatePnLDisplay();
   }
 
-  // Bind HUD DOM Events
+  // Bind Events
   function bindEvents(container) {
-    // Mode Switch
+    // Mode switch
     const modeBtn = container.querySelector('#fsm-toggle-mode');
     if (modeBtn) {
       modeBtn.onclick = () => {
         state.mode = state.mode === 'PRACTICE' ? 'LIVE_DOM' : 'PRACTICE';
-        showToast(`Switched to ${state.mode === 'PRACTICE' ? 'Practice (Simulated)' : 'Live DOM Execution'} Mode`);
+        showToast(`Mode: ${state.mode === 'PRACTICE' ? 'Practice (Simulated)' : 'Live DOM Execution'}`);
         saveState();
         renderHUD();
       };
@@ -561,7 +734,7 @@
     if (soundBtn) {
       soundBtn.onclick = () => {
         state.soundEnabled = !state.soundEnabled;
-        showToast(state.soundEnabled ? 'Audio Chimes Enabled' : 'Audio Chimes Muted');
+        showToast(state.soundEnabled ? 'Audio Chimes Enabled' : 'Audio Muted');
         saveState();
         renderHUD();
       };
@@ -574,6 +747,78 @@
         state.minimized = !state.minimized;
         saveState();
         renderHUD();
+      };
+    }
+
+    // Lot Stepper: Plus (+) and Minus (-)
+    const lotMinusBtn = container.querySelector('#fsm-lot-minus');
+    if (lotMinusBtn) {
+      lotMinusBtn.onclick = () => {
+        if (state.lots > 1) {
+          state.lots--;
+          state.qty = state.lots * state.lotSize;
+          updateLotDisplay();
+          saveState();
+        }
+      };
+    }
+
+    const lotPlusBtn = container.querySelector('#fsm-lot-plus');
+    if (lotPlusBtn) {
+      lotPlusBtn.onclick = () => {
+        state.lots++;
+        state.qty = state.lots * state.lotSize;
+        updateLotDisplay();
+        saveState();
+      };
+    }
+
+    // Lot Multipliers (1x, 2x, 3x, 5x, 10x)
+    container.querySelectorAll('.fsm-mult-btn').forEach(btn => {
+      btn.onclick = () => {
+        const mult = parseInt(btn.dataset.mult, 10);
+        if (mult > 0) {
+          state.lots = mult;
+          state.qty = state.lots * state.lotSize;
+          updateLotDisplay();
+          saveState();
+        }
+      };
+    });
+
+    // BUY Button
+    const buyBtn = container.querySelector('#fsm-buy-btn');
+    if (buyBtn) {
+      buyBtn.onclick = (e) => {
+        e.preventDefault();
+        executeOrder('BUY');
+      };
+    }
+
+    // SELL Button
+    const sellBtn = container.querySelector('#fsm-btn-sell');
+    if (sellBtn) {
+      sellBtn.onclick = (e) => {
+        e.preventDefault();
+        executeOrder('SELL');
+      };
+    }
+
+    // SQUARE OFF Button
+    const exitBtn = container.querySelector('#fsm-exit-btn');
+    if (exitBtn) {
+      exitBtn.onclick = (e) => {
+        e.preventDefault();
+        closeActivePosition();
+      };
+    }
+
+    // REVERSE Button
+    const reverseBtn = container.querySelector('#fsm-reverse-btn');
+    if (reverseBtn) {
+      reverseBtn.onclick = (e) => {
+        e.preventDefault();
+        reversePosition();
       };
     }
 
@@ -591,81 +836,41 @@
       };
     }
 
-    // Qty input & buttons
-    const qtyInput = container.querySelector('#fsm-qty-input');
-    if (qtyInput) {
-      qtyInput.onchange = (e) => {
-        const val = parseInt(e.target.value, 10);
-        if (val > 0) {
-          state.qty = val;
-          saveState();
-        }
-      };
-    }
-    container.querySelectorAll('.fsm-qty-btn').forEach(btn => {
-      btn.onclick = () => {
-        const q = parseInt(btn.dataset.qty, 10);
-        state.qty = q;
-        if (qtyInput) qtyInput.value = q;
-        saveState();
-      };
-    });
-
-    // Trade action buttons
-    const buyBtn = container.querySelector('#fsm-buy-btn');
-    if (buyBtn) buyBtn.onclick = () => executeOrder('BUY');
-
-    const sellBtn = container.querySelector('#fsm-btn-sell');
-    if (sellBtn) sellBtn.onclick = () => executeOrder('SELL');
-
-    const exitBtn = container.querySelector('#fsm-exit-btn');
-    if (exitBtn) exitBtn.onclick = () => closeActivePosition();
-
-    const reverseBtn = container.querySelector('#fsm-reverse-btn');
-    if (reverseBtn) reverseBtn.onclick = () => reversePosition();
-
     // Reset Day button
     const resetBtn = container.querySelector('#fsm-reset-btn');
-    if (resetBtn) resetBtn.onclick = () => resetDayStats();
+    if (resetBtn) {
+      resetBtn.onclick = () => resetDayStats();
+    }
   }
 
-  // Draggable HUD functionality
+  // Draggable HUD
   function setupDrag(element) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-    const handle = element.querySelector('#fsm-drag-handle') || element;
-
     element.onmousedown = (e) => {
       if (e.target.closest('#fsm-drag-handle')) {
         e.preventDefault();
         pos3 = e.clientX;
         pos4 = e.clientY;
-        document.onmouseup = closeDragElement;
-        document.onmousemove = elementDrag;
+        document.onmouseup = () => {
+          document.onmouseup = null;
+          document.onmousemove = null;
+        };
+        document.onmousemove = (e) => {
+          e.preventDefault();
+          pos1 = pos3 - e.clientX;
+          pos2 = pos4 - e.clientY;
+          pos3 = e.clientX;
+          pos4 = e.clientY;
+          element.style.top = (element.offsetTop - pos2) + "px";
+          element.style.left = (element.offsetLeft - pos1) + "px";
+          element.style.right = "auto";
+        };
       }
     };
-
-    function elementDrag(e) {
-      e.preventDefault();
-      pos1 = pos3 - e.clientX;
-      pos2 = pos4 - e.clientY;
-      pos3 = e.clientX;
-      pos4 = e.clientY;
-      const newTop = element.offsetTop - pos2;
-      const newLeft = element.offsetLeft - pos1;
-      element.style.top = newTop + "px";
-      element.style.left = newLeft + "px";
-      element.style.right = "auto";
-    }
-
-    function closeDragElement() {
-      document.onmouseup = null;
-      document.onmousemove = null;
-    }
   }
 
-  // Keyboard Shortcuts for Instant Scalping
+  // Hotkey Shortcuts
   window.addEventListener('keydown', (e) => {
-    // Avoid triggering shortcuts if user is typing in an input or textarea
     if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
 
     if (e.shiftKey && (e.key === 'B' || e.key === 'b')) {
@@ -685,23 +890,12 @@
     }
   });
 
-  // Practice Off-market Price Tick Simulator (Subtle live ticks when market is closed)
-  setInterval(() => {
-    if (state.isManualTicker) {
-      // Small simulated tick movement (-0.25 to +0.25 points)
-      const delta = (Math.random() - 0.49) * 0.5;
-      state.ltp = parseFloat((state.ltp + delta).toFixed(2));
-      updatePnLDisplay();
-    }
-  }, 400);
-
-  // Periodic DOM Market Data Scraping & PnL Refresh (every 300ms)
-  setInterval(() => {
-    scrapeFyersMarketData();
-  }, 300);
+  // Fast Scraping Loop (100ms interval for real-time tick and symbol tracking)
+  setInterval(scrapeActiveMarketData, 100);
 
   // Initialize
   loadState();
   renderHUD();
-  console.log('[ScalpMaster] Injected successfully into FYERS Terminal.');
+  scrapeActiveMarketData();
+  console.log('[ScalpMaster] Initialized successfully with auto-symbol & lot tracking.');
 })();
