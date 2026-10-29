@@ -1,5 +1,5 @@
 /**
- * FYERS ScalpMaster - Compact Scalping & Practice HUD
+ * FYERS ScalpMaster - Scalping & Practice HUD with Real Charges & Resizable Window
  * Injected into trade.fyers.in
  */
 
@@ -15,7 +15,7 @@
   }
   window.__fyers_scalpmaster_initialized = true;
 
-  const STATE_KEY = 'fsm_state_v3';
+  const STATE_KEY = 'fsm_state_v4';
 
   // State
   let state = {
@@ -29,9 +29,11 @@
     ltp: 0,
     prevLtp: 0,
     activePosition: null, // { symbol, side, qty, entryPrice, time, lastKnownLtp }
-    completedTrades: [],
+    completedTrades: [], // [{ id, symbol, side, qty, buyPrice, sellPrice, entryPrice, exitPrice, entryTime, exitTime, points, grossPnl, charges, netPnl, isWin }]
     dayStats: {
-      totalPnL: 0,
+      grossPnL: 0,
+      totalCharges: 0,
+      netPnL: 0,
       totalTrades: 0,
       wins: 0,
       losses: 0,
@@ -39,6 +41,7 @@
       peakPnL: 0,
       maxDrawdown: 0
     },
+    hudSize: { width: 300, height: null },
     minimized: false,
     soundEnabled: true
   };
@@ -112,7 +115,7 @@
     }
   }
 
-  // Toast Notification
+  // Toast
   function showToast(msg) {
     const toast = document.getElementById('fsm-toast');
     if (!toast) return;
@@ -121,6 +124,64 @@
     setTimeout(() => {
       toast.classList.remove('show');
     }, 2000);
+  }
+
+  // Calculate Real FYERS Brokerage & Regulatory Charges
+  function calculateTradeCharges(symbol, qty, buyPrice, sellPrice) {
+    const s = (symbol || '').toUpperCase();
+    const isOption = s.includes('CE') || s.includes('PE');
+    const isFuture = s.includes('FUT');
+    const buyTurnover = buyPrice * qty;
+    const sellTurnover = sellPrice * qty;
+    const totalTurnover = buyTurnover + sellTurnover;
+
+    let brokerage = 0;
+    let stt = 0;
+    let exchangeCharge = 0;
+    let stampDuty = 0;
+    const sebiCharge = totalTurnover * 0.000001; // ₹10 per crore
+
+    if (isOption) {
+      // FYERS Options: Flat ₹20 per executed order -> 2 orders (Buy + Sell) = ₹40.00
+      brokerage = 40.0;
+      // STT: 0.1% on sell side option premium
+      stt = sellTurnover * 0.001;
+      // NSE Exchange Charges: ~0.05% on premium turnover
+      exchangeCharge = totalTurnover * 0.0005;
+      // Stamp Duty: 0.003% on buy turnover
+      stampDuty = buyTurnover * 0.00003;
+    } else if (isFuture) {
+      // Futures: ₹20 or 0.03% (whichever lower) per order
+      brokerage = Math.min(20, buyTurnover * 0.0003) + Math.min(20, sellTurnover * 0.0003);
+      // STT: 0.02% on sell side
+      stt = sellTurnover * 0.0002;
+      // Exchange Charges: ~0.0019%
+      exchangeCharge = totalTurnover * 0.000019;
+      // Stamp Duty: 0.002% on buy side
+      stampDuty = buyTurnover * 0.00002;
+    } else {
+      // Equity Intraday: ₹20 or 0.03% (whichever lower) per order
+      brokerage = Math.min(20, buyTurnover * 0.0003) + Math.min(20, sellTurnover * 0.0003);
+      // STT: 0.025% on sell side
+      stt = sellTurnover * 0.00025;
+      // Exchange Charges: ~0.00325%
+      exchangeCharge = totalTurnover * 0.0000325;
+      // Stamp Duty: 0.003% on buy side
+      stampDuty = buyTurnover * 0.00003;
+    }
+
+    // GST: 18% on (Brokerage + Exchange Charges + SEBI Charges)
+    const gst = (brokerage + exchangeCharge + sebiCharge) * 0.18;
+    const totalCharges = parseFloat((brokerage + stt + exchangeCharge + gst + stampDuty + sebiCharge).toFixed(2));
+
+    return {
+      brokerage: parseFloat(brokerage.toFixed(2)),
+      stt: parseFloat(stt.toFixed(2)),
+      exchangeCharge: parseFloat(exchangeCharge.toFixed(2)),
+      gst: parseFloat(gst.toFixed(2)),
+      stampDuty: parseFloat(stampDuty.toFixed(2)),
+      totalCharges
+    };
   }
 
   // Load Saved State
@@ -133,6 +194,7 @@
           state.completedTrades = saved.completedTrades || [];
           state.activePosition = saved.activePosition || null;
           state.lots = saved.lots || 1;
+          state.hudSize = saved.hudSize || state.hudSize;
           state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
           state.minimized = !!saved.minimized;
           state.mode = saved.mode || 'PRACTICE';
@@ -303,7 +365,7 @@
       handleSymbolUpdate(detectedSymbol);
     }
 
-    // Apply price ONLY IF valid and non-zero (NEVER reset to zero!)
+    // Apply price ONLY IF valid and non-zero
     if (detectedPrice !== null && !isNaN(detectedPrice) && detectedPrice > 0) {
       state.prevLtp = state.ltp || detectedPrice;
       state.ltp = detectedPrice;
@@ -334,11 +396,10 @@
     }
   }
 
-  // Calculate Unrealized PnL (With Instrument Safety Check)
+  // Calculate Unrealized PnL of Open Position
   function calculateCurrentPnL() {
-    if (!state.activePosition) return { pnl: 0, points: 0 };
+    if (!state.activePosition) return { pnl: 0, points: 0, charges: 0, netPnl: 0 };
 
-    // If current chart is on a different symbol, use position's last known LTP to prevent wild mismatches
     let currentPrice = state.ltp;
     if (state.symbol && state.activePosition.symbol && state.symbol !== state.activePosition.symbol) {
       currentPrice = state.activePosition.lastKnownLtp || state.activePosition.entryPrice;
@@ -346,38 +407,75 @@
       state.activePosition.lastKnownLtp = currentPrice;
     }
 
-    if (!currentPrice || currentPrice <= 0) return { pnl: 0, points: 0 };
+    if (!currentPrice || currentPrice <= 0) return { pnl: 0, points: 0, charges: 0, netPnl: 0 };
 
     const entryPrice = state.activePosition.entryPrice;
     const qty = state.activePosition.qty;
 
     let points = 0;
+    let buyPrice = 0;
+    let sellPrice = 0;
+
     if (state.activePosition.side === 'BUY') {
       points = currentPrice - entryPrice;
+      buyPrice = entryPrice;
+      sellPrice = currentPrice;
     } else {
       points = entryPrice - currentPrice;
+      buyPrice = currentPrice;
+      sellPrice = entryPrice;
     }
+
     const pnl = points * qty;
-    return { pnl, points };
+    const chargeInfo = calculateTradeCharges(state.activePosition.symbol, qty, buyPrice, sellPrice);
+    const netPnl = pnl - chargeInfo.totalCharges;
+
+    return {
+      pnl,
+      points,
+      charges: chargeInfo.totalCharges,
+      netPnl
+    };
   }
 
   // Update Dynamic PnL Display
   function updatePnLDisplay() {
-    const { pnl, points } = calculateCurrentPnL();
-    const totalDayPnL = state.dayStats.totalPnL + pnl;
+    const { pnl, points, charges, netPnl } = calculateCurrentPnL();
+
+    // Gross Day PnL + current open trade gross PnL
+    const liveGrossDayPnL = state.dayStats.grossPnL + pnl;
+    // Total charges today (realized + open trade charges)
+    const liveTotalCharges = state.dayStats.totalCharges + (state.activePosition ? charges : 0);
+    // Net Day PnL = Gross - Charges
+    const liveNetDayPnL = liveGrossDayPnL - liveTotalCharges;
 
     const dayPnlEl = document.getElementById('fsm-day-pnl-val');
     if (dayPnlEl) {
-      const sign = totalDayPnL >= 0 ? '+' : '';
-      dayPnlEl.textContent = `${sign}₹${totalDayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      dayPnlEl.className = 'fsm-day-pnl-value ' + (totalDayPnL > 0 ? 'fsm-pnl-positive' : totalDayPnL < 0 ? 'fsm-pnl-negative' : '');
+      const sign = liveNetDayPnL >= 0 ? '+' : '';
+      dayPnlEl.textContent = `${sign}₹${liveNetDayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      dayPnlEl.className = 'fsm-day-pnl-value ' + (liveNetDayPnL > 0 ? 'fsm-pnl-positive' : liveNetDayPnL < 0 ? 'fsm-pnl-negative' : '');
     }
 
+    // Breakdown sub-row
+    const grossEl = document.getElementById('fsm-day-gross');
+    const chargesEl = document.getElementById('fsm-day-charges');
+    if (grossEl && chargesEl) {
+      const gSign = liveGrossDayPnL >= 0 ? '+' : '';
+      grossEl.textContent = `Gross: ${gSign}₹${liveGrossDayPnL.toFixed(2)}`;
+      grossEl.style.color = liveGrossDayPnL > 0 ? '#34d399' : liveGrossDayPnL < 0 ? '#f87171' : '#94a3b8';
+      chargesEl.textContent = `Charges: ₹${liveTotalCharges.toFixed(2)}`;
+    }
+
+    // Active Position Live PnL
     const activePnlEl = document.getElementById('fsm-active-pnl-val');
     if (activePnlEl && state.activePosition) {
       const sign = pnl >= 0 ? '+' : '';
-      activePnlEl.textContent = `${sign}₹${pnl.toFixed(2)} (${points >= 0 ? '+' : ''}${points.toFixed(2)} pts)`;
-      activePnlEl.className = 'fsm-position-pnl ' + (pnl > 0 ? 'fsm-pnl-positive' : pnl < 0 ? 'fsm-pnl-negative' : '');
+      activePnlEl.innerHTML = `
+        <span class="${pnl >= 0 ? 'fsm-pnl-positive' : 'fsm-pnl-negative'}">${sign}₹${pnl.toFixed(2)} (${points >= 0 ? '+' : ''}${points.toFixed(2)} pts)</span>
+        <span style="font-size: 10px; color: var(--fsm-text-muted); font-weight: 500; display: block; margin-top: 1px;">
+          Est. Charges: ₹${charges.toFixed(2)} | Net: ${netPnl >= 0 ? '+' : ''}₹${netPnl.toFixed(2)}
+        </span>
+      `;
     }
   }
 
@@ -445,7 +543,7 @@
     renderHUD();
   }
 
-  // Close Position
+  // Close Active Position
   function closeActivePosition() {
     if (!state.activePosition) return;
     initAudio();
@@ -454,46 +552,72 @@
       ? state.ltp
       : (state.activePosition.lastKnownLtp || state.activePosition.entryPrice);
 
-    const { pnl, points } = calculateCurrentPnL();
+    const entryPrice = state.activePosition.entryPrice;
+    const qty = state.activePosition.qty;
     const nowStr = new Date().toLocaleTimeString();
+
+    let points = 0;
+    let buyPrice = 0;
+    let sellPrice = 0;
+
+    if (state.activePosition.side === 'BUY') {
+      points = exitPrice - entryPrice;
+      buyPrice = entryPrice;
+      sellPrice = exitPrice;
+    } else {
+      points = entryPrice - exitPrice;
+      buyPrice = exitPrice;
+      sellPrice = entryPrice;
+    }
+
+    const grossPnl = parseFloat((points * qty).toFixed(2));
+    const chargeInfo = calculateTradeCharges(state.activePosition.symbol, qty, buyPrice, sellPrice);
+    const charges = chargeInfo.totalCharges;
+    const netPnl = parseFloat((grossPnl - charges).toFixed(2));
 
     const trade = {
       id: Date.now(),
       symbol: state.activePosition.symbol,
       side: state.activePosition.side,
-      qty: state.activePosition.qty,
-      entryPrice: state.activePosition.entryPrice,
+      qty: qty,
+      buyPrice: parseFloat(buyPrice.toFixed(2)),
+      sellPrice: parseFloat(sellPrice.toFixed(2)),
+      entryPrice: entryPrice,
       exitPrice: exitPrice,
       entryTime: state.activePosition.time,
       exitTime: nowStr,
       points: parseFloat(points.toFixed(2)),
-      pnl: parseFloat(pnl.toFixed(2)),
-      isWin: pnl > 0
+      grossPnl: grossPnl,
+      charges: charges,
+      netPnl: netPnl,
+      isWin: netPnl > 0
     };
 
     state.completedTrades.unshift(trade);
     state.dayStats.totalTrades += 1;
-    state.dayStats.totalPnL = parseFloat((state.dayStats.totalPnL + pnl).toFixed(2));
+    state.dayStats.grossPnL = parseFloat((state.dayStats.grossPnL + grossPnl).toFixed(2));
+    state.dayStats.totalCharges = parseFloat((state.dayStats.totalCharges + charges).toFixed(2));
+    state.dayStats.netPnL = parseFloat((state.dayStats.grossPnL - state.dayStats.totalCharges).toFixed(2));
 
-    if (pnl > 0) {
+    if (netPnl > 0) {
       state.dayStats.wins += 1;
       playSound('WIN');
-    } else if (pnl < 0) {
+    } else if (netPnl < 0) {
       state.dayStats.losses += 1;
       playSound('LOSS');
     }
 
     state.dayStats.winRate = Math.round((state.dayStats.wins / state.dayStats.totalTrades) * 100);
 
-    if (state.dayStats.totalPnL > state.dayStats.peakPnL) {
-      state.dayStats.peakPnL = state.dayStats.totalPnL;
+    if (state.dayStats.netPnL > state.dayStats.peakPnL) {
+      state.dayStats.peakPnL = state.dayStats.netPnL;
     }
-    const currentDrawdown = state.dayStats.peakPnL - state.dayStats.totalPnL;
+    const currentDrawdown = state.dayStats.peakPnL - state.dayStats.netPnL;
     if (currentDrawdown > state.dayStats.maxDrawdown) {
       state.dayStats.maxDrawdown = currentDrawdown;
     }
 
-    showToast(`Closed ${trade.side}: ${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(2)}`);
+    showToast(`Closed ${trade.side}: Net ${netPnl >= 0 ? '+' : ''}₹${netPnl.toFixed(2)} (Charges: ₹${charges.toFixed(2)})`);
     state.activePosition = null;
 
     saveState();
@@ -545,7 +669,9 @@
       state.activePosition = null;
       state.completedTrades = [];
       state.dayStats = {
-        totalPnL: 0,
+        grossPnL: 0,
+        totalCharges: 0,
+        netPnL: 0,
         totalTrades: 0,
         wins: 0,
         losses: 0,
@@ -566,7 +692,14 @@
       container = document.createElement('div');
       container.id = 'fyers-scalpmaster-hud';
       document.body.appendChild(container);
-      setupDrag(container);
+      setupDragAndResize(container);
+    }
+
+    if (state.hudSize && state.hudSize.width) {
+      container.style.width = state.hudSize.width + 'px';
+    }
+    if (state.hudSize && state.hudSize.height) {
+      container.style.height = state.hudSize.height + 'px';
     }
 
     if (state.minimized) {
@@ -575,11 +708,20 @@
       container.classList.remove('fsm-minimized');
     }
 
-    const { pnl } = calculateCurrentPnL();
-    const totalDayPnL = state.dayStats.totalPnL + pnl;
-    const daySign = totalDayPnL >= 0 ? '+' : '';
+    const { pnl, charges } = calculateCurrentPnL();
+    const liveGrossDayPnL = state.dayStats.grossPnL + pnl;
+    const liveTotalCharges = state.dayStats.totalCharges + (state.activePosition ? charges : 0);
+    const liveNetDayPnL = liveGrossDayPnL - liveTotalCharges;
+    const daySign = liveNetDayPnL >= 0 ? '+' : '';
 
     container.innerHTML = `
+      <!-- Edge & Corner Resize Handles -->
+      <div class="fsm-resize-handle fsm-resize-r" data-resize="r"></div>
+      <div class="fsm-resize-handle fsm-resize-b" data-resize="b"></div>
+      <div class="fsm-resize-handle fsm-resize-l" data-resize="l"></div>
+      <div class="fsm-resize-handle fsm-resize-corner" data-resize="corner"></div>
+
+      <!-- Header -->
       <div class="fsm-header" id="fsm-drag-handle">
         <div class="fsm-title">
           <span>⚡ ScalpMaster</span>
@@ -605,11 +747,19 @@
           </div>
         </div>
 
-        <!-- Day Net P&L Summary -->
+        <!-- Day Net P&L Summary (Gross, Charges, Net) -->
         <div class="fsm-day-pnl-card">
-          <div class="fsm-day-pnl-label">Day Net P&amp;L</div>
-          <div class="fsm-day-pnl-value ${totalDayPnL > 0 ? 'fsm-pnl-positive' : totalDayPnL < 0 ? 'fsm-pnl-negative' : ''}" id="fsm-day-pnl-val">
-            ${daySign}₹${totalDayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <div class="fsm-day-pnl-label">Day Net P&amp;L (After FYERS Charges)</div>
+          <div class="fsm-day-pnl-value ${liveNetDayPnL > 0 ? 'fsm-pnl-positive' : liveNetDayPnL < 0 ? 'fsm-pnl-negative' : ''}" id="fsm-day-pnl-val">
+            ${daySign}₹${liveNetDayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div class="fsm-breakdown-row">
+            <span id="fsm-day-gross" style="color: ${liveGrossDayPnL > 0 ? '#34d399' : liveGrossDayPnL < 0 ? '#f87171' : '#94a3b8'};">
+              Gross: ${liveGrossDayPnL >= 0 ? '+' : ''}₹${liveGrossDayPnL.toFixed(2)}
+            </span>
+            <span id="fsm-day-charges" style="color: #f59e0b;">
+              Charges: ₹${liveTotalCharges.toFixed(2)}
+            </span>
           </div>
           <div class="fsm-stats-grid">
             <div class="fsm-stat-item">
@@ -696,29 +846,43 @@
           `}
         </div>
 
-        <!-- Tab 2: Trade Log -->
+        <!-- Tab 2: Trade Log with Detailed Buy/Sell Prices, Gross P&L, Charges, and Net P&L -->
         <div id="fsm-tab-content-hist" style="display: ${state.activeTab === 'history' ? 'block' : 'none'};">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <span style="font-size: 10px; color: var(--fsm-text-muted);">Completed Scalps</span>
+            <span style="font-size: 10px; color: var(--fsm-text-muted);">Completed Scalps &amp; Charges</span>
             <button id="fsm-reset-btn" style="background: none; border: none; color: #f87171; cursor: pointer; font-size: 10px; text-decoration: underline;">Reset Day</button>
           </div>
           <div class="fsm-orders-list">
             ${state.completedTrades.length === 0 ? `
               <div style="text-align: center; color: var(--fsm-text-muted); padding: 8px; font-size: 10px;">No completed scalps yet.</div>
             ` : state.completedTrades.map(t => `
-              <div class="fsm-order-row">
-                <div style="display: flex; flex-direction: column;">
+              <div class="fsm-order-card">
+                <div class="fsm-order-top">
                   <div style="display: flex; align-items: center; gap: 4px;">
                     <span class="fsm-order-side ${t.side === 'BUY' ? 'fsm-type-long' : 'fsm-type-short'}">${t.side}</span>
-                    <span style="font-weight: 700;">${t.qty} @ ₹${t.entryPrice.toFixed(2)}</span>
+                    <span style="font-weight: 700; font-size: 11px;">${t.qty} Qty</span>
                   </div>
-                  <span style="font-size: 8px; color: var(--fsm-text-muted);">${t.symbol}</span>
+                  <div style="font-weight: 800; font-size: 12px; color: ${t.netPnl >= 0 ? '#34d399' : '#f87171'};">
+                    Net: ${t.netPnl >= 0 ? '+' : ''}₹${t.netPnl.toFixed(2)}
+                  </div>
                 </div>
-                <div style="text-align: right;">
-                  <div style="font-weight: 800; color: ${t.pnl >= 0 ? '#34d399' : '#f87171'}; font-size: 11px;">
-                    ${t.pnl >= 0 ? '+' : ''}₹${t.pnl.toFixed(2)}
-                  </div>
-                  <div style="font-size: 8px; color: var(--fsm-text-muted);">${t.points >= 0 ? '+' : ''}${t.points} pts</div>
+
+                <div class="fsm-order-prices">
+                  <span>Buy: <b style="color: #34d399;">₹${t.buyPrice.toFixed(2)}</b></span>
+                  <span>Sell: <b style="color: #f87171;">₹${t.sellPrice.toFixed(2)}</b></span>
+                  <span>${t.points >= 0 ? '+' : ''}${t.points} pts</span>
+                </div>
+
+                <div class="fsm-order-charges-row">
+                  <span style="color: ${t.grossPnl >= 0 ? '#34d399' : '#f87171'};">
+                    Gross: ${t.grossPnl >= 0 ? '+' : ''}₹${t.grossPnl.toFixed(2)}
+                  </span>
+                  <span style="color: #f59e0b;" title="Brokerage ₹40 + STT + Turnover + GST">
+                    Charges: -₹${t.charges.toFixed(2)}
+                  </span>
+                  <span style="color: var(--fsm-text-muted); font-size: 8px;">
+                    ${t.exitTime}
+                  </span>
                 </div>
               </div>
             `).join('')}
@@ -823,30 +987,87 @@
     if (resetBtn) resetBtn.onclick = () => resetDayStats();
   }
 
-  // Dragging
-  function setupDrag(element) {
-    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+  // Dragging and Edge Resizing Handler
+  function setupDragAndResize(element) {
+    let startX = 0, startY = 0, startW = 0, startH = 0, startLeft = 0, startTop = 0;
+    let currentAction = null; // 'drag', 'resize-r', 'resize-b', 'resize-l', 'resize-corner'
+
     element.onmousedown = (e) => {
+      // Check resize handles
+      const resizeHandle = e.target.closest('.fsm-resize-handle');
+      if (resizeHandle) {
+        e.preventDefault();
+        const type = resizeHandle.dataset.resize;
+        currentAction = 'resize-' + type;
+        startX = e.clientX;
+        startY = e.clientY;
+        startW = element.offsetWidth;
+        startH = element.offsetHeight;
+        startLeft = element.offsetLeft;
+        startTop = element.offsetTop;
+        document.onmousemove = onMouseMove;
+        document.onmouseup = onMouseUp;
+        return;
+      }
+
+      // Check drag handle (header)
       if (e.target.closest('#fsm-drag-handle')) {
         e.preventDefault();
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        document.onmouseup = () => {
-          document.onmouseup = null;
-          document.onmousemove = null;
-        };
-        document.onmousemove = (e) => {
-          e.preventDefault();
-          pos1 = pos3 - e.clientX;
-          pos2 = pos4 - e.clientY;
-          pos3 = e.clientX;
-          pos4 = e.clientY;
-          element.style.top = (element.offsetTop - pos2) + "px";
-          element.style.left = (element.offsetLeft - pos1) + "px";
-          element.style.right = "auto";
-        };
+        currentAction = 'drag';
+        startX = e.clientX;
+        startY = e.clientY;
+        document.onmousemove = onMouseMove;
+        document.onmouseup = onMouseUp;
       }
     };
+
+    function onMouseMove(e) {
+      e.preventDefault();
+      if (!currentAction) return;
+
+      if (currentAction === 'drag') {
+        const dx = startX - e.clientX;
+        const dy = startY - e.clientY;
+        startX = e.clientX;
+        startY = e.clientY;
+        element.style.top = (element.offsetTop - dy) + "px";
+        element.style.left = (element.offsetLeft - dx) + "px";
+        element.style.right = "auto";
+      } else if (currentAction === 'resize-r') {
+        const newW = Math.max(260, Math.min(650, startW + (e.clientX - startX)));
+        element.style.width = newW + 'px';
+        state.hudSize.width = newW;
+      } else if (currentAction === 'resize-b') {
+        const newH = Math.max(220, startH + (e.clientY - startY));
+        element.style.height = newH + 'px';
+        state.hudSize.height = newH;
+      } else if (currentAction === 'resize-l') {
+        const diff = e.clientX - startX;
+        const newW = Math.max(260, Math.min(650, startW - diff));
+        if (newW >= 260 && newW <= 650) {
+          element.style.width = newW + 'px';
+          element.style.left = (startLeft + diff) + 'px';
+          element.style.right = 'auto';
+          state.hudSize.width = newW;
+        }
+      } else if (currentAction === 'resize-corner') {
+        const newW = Math.max(260, Math.min(650, startW + (e.clientX - startX)));
+        const newH = Math.max(220, startH + (e.clientY - startY));
+        element.style.width = newW + 'px';
+        element.style.height = newH + 'px';
+        state.hudSize.width = newW;
+        state.hudSize.height = newH;
+      }
+    }
+
+    function onMouseUp() {
+      if (currentAction && currentAction.startsWith('resize')) {
+        saveState();
+      }
+      currentAction = null;
+      document.onmousemove = null;
+      document.onmouseup = null;
+    }
   }
 
   // Keyboard Shortcuts
@@ -876,5 +1097,5 @@
   // Initialize
   loadState();
   scrapeActiveMarketData();
-  console.log('[ScalpMaster] Injected smoothly without zero flicker.');
+  console.log('[ScalpMaster] Initialized with real FYERS charges and resizable edge handles.');
 })();

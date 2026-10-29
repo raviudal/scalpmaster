@@ -1,8 +1,8 @@
-/* FYERS ScalpMaster - Compact Floating Scalping HUD */
+/* FYERS ScalpMaster - Scalping & Practice HUD with Resizable Edges */
 :root {
-  --fsm-bg: rgba(15, 23, 42, 0.95);
+  --fsm-bg: rgba(15, 23, 42, 0.96);
   --fsm-card-bg: rgba(30, 41, 59, 0.7);
-  --fsm-border: rgba(51, 65, 85, 0.8);
+  --fsm-border: rgba(51, 65, 85, 0.85);
   --fsm-text: #f8fafc;
   --fsm-text-muted: #94a3b8;
   --fsm-green: #10b981;
@@ -19,7 +19,10 @@
   position: fixed;
   top: 65px;
   right: 20px;
-  width: 290px;
+  width: 300px;
+  min-width: 260px;
+  max-width: 650px;
+  min-height: 220px;
   background: var(--fsm-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -31,14 +34,65 @@
   color: var(--fsm-text);
   font-size: 12px;
   user-select: none;
-  transition: box-shadow 0.2s, opacity 0.2s;
+  box-sizing: border-box;
 }
 
 #fyers-scalpmaster-hud * {
   box-sizing: border-box;
 }
 
-/* Compact Header */
+/* Edge & Corner Resize Handles */
+.fsm-resize-handle {
+  position: absolute;
+  z-index: 10000;
+}
+
+.fsm-resize-r {
+  right: -3px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.fsm-resize-b {
+  bottom: -3px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.fsm-resize-l {
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.fsm-resize-corner {
+  bottom: -3px;
+  right: -3px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  border-bottom-right-radius: 10px;
+}
+
+.fsm-resize-corner::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--fsm-text-muted);
+  border-bottom: 2px solid var(--fsm-text-muted);
+  opacity: 0.5;
+}
+
+/* Header */
 .fsm-header {
   display: flex;
   align-items: center;
@@ -114,7 +168,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 520px;
+  max-height: 560px;
   overflow-y: auto;
 }
 
@@ -126,7 +180,7 @@
   border-radius: 2px;
 }
 
-/* Big Live Price & Instrument Hero Section */
+/* Hero Live Price & Symbol */
 .fsm-hero-section {
   display: flex;
   justify-content: space-between;
@@ -140,7 +194,7 @@
 .fsm-symbol-info {
   display: flex;
   flex-direction: column;
-  max-width: 140px;
+  max-width: 60%;
 }
 
 .fsm-symbol-name {
@@ -186,7 +240,7 @@
   text-shadow: 0 0 8px rgba(248, 113, 113, 0.5);
 }
 
-/* Compact Day PnL Summary */
+/* Day Net PnL Summary (with Gross, Charges, Net) */
 .fsm-day-pnl-card {
   background: rgba(30, 41, 59, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -210,6 +264,16 @@
   color: #94a3b8;
   line-height: 1.2;
   margin: 1px 0;
+}
+
+.fsm-breakdown-row {
+  display: flex;
+  justify-content: space-around;
+  font-size: 9px;
+  color: var(--fsm-text-muted);
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .fsm-pnl-positive {
@@ -247,7 +311,7 @@
   font-weight: 700;
 }
 
-/* Compact Lot Stepper Row */
+/* Lot Stepper Row */
 .fsm-lot-row {
   display: flex;
   align-items: center;
@@ -325,7 +389,7 @@
   border-color: var(--fsm-accent);
 }
 
-/* Small, Sleek Scalping Buttons */
+/* Scalping Buttons */
 .fsm-trade-btns {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -514,21 +578,43 @@
 }
 
 .fsm-orders-list {
-  max-height: 120px;
+  max-height: 140px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fsm-order-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-size: 10px;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
-.fsm-order-row {
+.fsm-order-top {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  background: rgba(15, 23, 42, 0.6);
-  padding: 4px 6px;
-  border-radius: 4px;
-  font-size: 10px;
+  align-items: center;
+}
+
+.fsm-order-prices {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--fsm-text-muted);
+}
+
+.fsm-order-charges-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  padding-top: 2px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
 }
 
 .fsm-order-side {
@@ -538,16 +624,18 @@
   font-size: 9px;
 }
 
-/* Minimized HUD pill */
+/* Minimized HUD */
 .fsm-minimized {
   width: auto !important;
   min-width: 170px;
+  min-height: unset !important;
 }
-.fsm-minimized .fsm-body {
+.fsm-minimized .fsm-body,
+.fsm-minimized .fsm-resize-handle {
   display: none !important;
 }
 
-/* Toast alert inside HUD */
+/* Toast alert */
 .fsm-toast {
   position: absolute;
   bottom: 6px;
@@ -565,7 +653,7 @@
   transition: opacity 0.25s;
   white-space: nowrap;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
-  z-index: 1000;
+  z-index: 10000;
 }
 .fsm-toast.show {
   opacity: 1;
