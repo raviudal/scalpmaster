@@ -84,11 +84,11 @@ Calculates true transaction costs according to standard Indian broker schedules:
 
 ## 🤝 Support the Project (Referral Link)
 
-If you find this project helpful and want to open a new Demat / Trading account, you can use the referral link below:
+If you find this project helpful and want to open a new Demat / Trading account on FYERS, you can support this open-source work by signing up through the official referral link below:
 
-👉 **[Open a Trading Account using my Referral Link](https://raviudal.github.io/portfolio_site/)** *(Replace with your direct broker referral link)*
+👉 **[Register on FYERS (Open a Free Demat Account)](https://signup.fyers.in/?utm-source=AP-Leads&utm-medium=AP4530)**
 
-> *Affiliate Disclosure: If you sign up using this referral link, the developer may receive a small referral incentive from the broker at zero extra cost to you. This helps support free, open-source software development.*
+> *Affiliate Disclosure: If you sign up using this referral link, the developer may receive a small referral incentive from the broker at zero extra cost to you. This helps support continuous updates and free, open-source software development.*
 
 ---
 

@@ -356,5 +356,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Referral link
+  const signupLink = document.getElementById('fyers-signup-link');
+  if (signupLink) {
+    signupLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: 'https://signup.fyers.in/?utm-source=AP-Leads&utm-medium=AP4530' });
+    });
+  }
+
   loadData();
 });
