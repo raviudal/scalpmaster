@@ -1,4 +1,4 @@
-/* FYERS ScalpMaster - Scalping & Practice HUD with Resizable Edges */
+/* FYERS ScalpMaster - Scalping & Practice HUD with TV Chart Markers & Stop-Loss */
 :root {
   --fsm-bg: rgba(15, 23, 42, 0.96);
   --fsm-card-bg: rgba(30, 41, 59, 0.7);
@@ -20,9 +20,6 @@
   top: 65px;
   right: 20px;
   width: 300px;
-  min-width: 260px;
-  max-width: 650px;
-  min-height: 220px;
   background: var(--fsm-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -39,57 +36,6 @@
 
 #fyers-scalpmaster-hud * {
   box-sizing: border-box;
-}
-
-/* Edge & Corner Resize Handles */
-.fsm-resize-handle {
-  position: absolute;
-  z-index: 10000;
-}
-
-.fsm-resize-r {
-  right: -3px;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-  cursor: ew-resize;
-}
-
-.fsm-resize-b {
-  bottom: -3px;
-  left: 0;
-  right: 0;
-  height: 8px;
-  cursor: ns-resize;
-}
-
-.fsm-resize-l {
-  left: -3px;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-  cursor: ew-resize;
-}
-
-.fsm-resize-corner {
-  bottom: -3px;
-  right: -3px;
-  width: 14px;
-  height: 14px;
-  cursor: nwse-resize;
-  border-bottom-right-radius: 10px;
-}
-
-.fsm-resize-corner::after {
-  content: '';
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 6px;
-  height: 6px;
-  border-right: 2px solid var(--fsm-text-muted);
-  border-bottom: 2px solid var(--fsm-text-muted);
-  opacity: 0.5;
 }
 
 /* Header */
@@ -178,6 +124,21 @@
 .fsm-body::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 2px;
+}
+
+/* Locked Instrument Warning Banner */
+.fsm-locked-banner {
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.2;
 }
 
 /* Hero Live Price & Symbol */
@@ -397,7 +358,7 @@
 }
 
 .fsm-btn-small {
-  padding: 5px 6px;
+  padding: 6px 6px;
   border-radius: 5px;
   border: none;
   font-weight: 700;
@@ -417,11 +378,18 @@
   transform: translateY(1px) scale(0.97);
 }
 
+.fsm-btn-small:disabled {
+  background: #334155 !important;
+  color: #64748b !important;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .fsm-btn-buy {
   background: linear-gradient(135deg, #10b981, #059669);
 }
 
-.fsm-btn-buy:hover {
+.fsm-btn-buy:hover:not(:disabled) {
   background: linear-gradient(135deg, #34d399, #10b981);
 }
 
@@ -429,7 +397,7 @@
   background: linear-gradient(135deg, #ef4444, #dc2626);
 }
 
-.fsm-btn-sell:hover {
+.fsm-btn-sell:hover:not(:disabled) {
   background: linear-gradient(135deg, #f87171, #ef4444);
 }
 
@@ -441,7 +409,7 @@
 
 .fsm-action-strip {
   display: grid;
-  grid-template-columns: 1.8fr 1fr;
+  grid-template-columns: 1fr;
   gap: 6px;
 }
 
@@ -450,11 +418,12 @@
   color: #fff;
   border: none;
   border-radius: 4px;
-  padding: 4px 6px;
+  padding: 5px 6px;
   font-weight: 700;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
   transition: all 0.12s;
+  text-align: center;
 }
 
 .fsm-btn-exit:hover {
@@ -468,30 +437,7 @@
   opacity: 0.5;
 }
 
-.fsm-btn-reverse {
-  background: #4f46e5;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 6px;
-  font-weight: 700;
-  font-size: 10px;
-  cursor: pointer;
-  transition: all 0.12s;
-}
-
-.fsm-btn-reverse:hover {
-  background: #6366f1;
-}
-
-.fsm-btn-reverse:disabled {
-  background: #334155;
-  color: #64748b;
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-/* Active Live Position Card */
+/* Active Live Position Card with Stop Loss Section */
 .fsm-position-card {
   background: var(--fsm-card-bg);
   border: 1px solid var(--fsm-border);
@@ -499,7 +445,7 @@
   padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
 .fsm-position-header {
@@ -541,6 +487,78 @@
   color: var(--fsm-text-muted);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   padding-top: 3px;
+}
+
+/* Stop Loss Bar in Position Card */
+.fsm-sl-section {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 5px;
+  padding: 5px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fsm-sl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+}
+
+.fsm-sl-label {
+  color: #f87171;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.fsm-sl-price {
+  font-weight: 800;
+  color: #fff;
+  font-family: monospace;
+}
+
+.fsm-sl-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.fsm-sl-btn {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.fsm-sl-btn:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+.fsm-sl-btn.active {
+  background: #ef4444;
+  color: #fff;
+}
+
+.fsm-sl-clear {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.fsm-sl-clear:hover {
+  color: #f87171;
 }
 
 .fsm-no-pos {
@@ -630,8 +648,7 @@
   min-width: 170px;
   min-height: unset !important;
 }
-.fsm-minimized .fsm-body,
-.fsm-minimized .fsm-resize-handle {
+.fsm-minimized .fsm-body {
   display: none !important;
 }
 
