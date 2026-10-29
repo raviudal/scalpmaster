@@ -1,18 +1,18 @@
-# ⚡ FYERS ScalpMaster
+# ⚡ ScalpMaster
 
-> **A high-speed scalping HUD & paper trading Chrome Extension (Manifest V3) for the [FYERS Web Trading Terminal](https://trade.fyers.in/).**
+> **A high-speed scalping HUD & paper trading Chrome Extension (Manifest V3) for Web Trading Terminals.**
 
 [![Portfolio](https://img.shields.io/badge/Developer-Portfolio-blue?style=flat&logo=globe)](https://raviudal.github.io/portfolio_site/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Manifest V3](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-green)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 
-![FYERS ScalpMaster](icons/icon128.png)
+![ScalpMaster](icons/icon128.png)
 
 ---
 
 ## 📌 Project Overview
 
-**FYERS ScalpMaster** is a lightweight, high-performance browser extension tailored for day traders and scalpers using the FYERS Web trading platform. It overlays an interactive heads-up display (HUD) directly on your TradingView chart canvas, enabling single-click paper scalping, automated instrument and lot detection, full-width draggable stop-loss order lines, real-time brokerage and tax calculations, and daily equity curve analytics.
+**ScalpMaster** is a lightweight, high-performance browser extension tailored for intraday traders and scalpers using web trading terminals. It overlays an interactive heads-up display (HUD) directly on your TradingView chart canvas, enabling single-click paper scalping, automated instrument and lot detection, full-width draggable stop-loss order lines, real-time brokerage and statutory charge calculations, and daily equity curve analytics.
 
 This project was built to help traders practice execution discipline, test intraday scalping strategies, and analyze net profitability after all exchange and regulatory charges without putting real capital at risk.
 
@@ -37,8 +37,8 @@ This project was built to help traders practice execution discipline, test intra
 - **Automated Execution Engine**: Evaluates price ticks every 100ms and triggers an automatic market exit the moment price breaches your stop level.
 - **Visual Chart Markers**: Places clear execution pins (`BUY`, `SELL`, `EXIT`, `SL HIT`) on the chart candles via `chart.createExecutionShape()`.
 
-### 4. 💰 Real FYERS Brokerage & Statutory Charges Calculator
-Calculates true transaction costs according to official FYERS schedules:
+### 4. 💰 Real Brokerage & Statutory Charges Calculator
+Calculates true transaction costs according to standard Indian broker schedules:
 - **Brokerage**: Flat ₹20 per executed order (₹40 round-trip for Options).
 - **STT/CTT**: 0.1% on options sell side / equity delivery.
 - **Exchange Turnover**: NSE/BSE turnover fees.
@@ -72,13 +72,23 @@ Calculates true transaction costs according to official FYERS schedules:
 
 ## 🖥️ How to Use
 
-1. Navigate and log into [trade.fyers.in](https://trade.fyers.in/).
+1. Navigate and log into your web trading terminal ([trade.fyers.in](https://trade.fyers.in/)).
 2. Open any chart (Index, Stocks, Options, or Futures).
 3. The **ScalpMaster HUD** will mount in the top-right area of the chart with your active instrument and live LTP.
 4. Select your lots using `[+]` / `[-]`.
 5. Click **BUY** or **SELL** to enter a practice scalp.
 6. Click any quick SL button (e.g., `5 pts`, `10 pts`) to place an interactive draggable stop-loss line on your chart.
 7. Click the extension toolbar icon at any time to inspect your **Equity Curve**, export your **Trade Log (CSV)**, or toggle HUD visibility.
+
+---
+
+## 🤝 Support the Project (Referral Link)
+
+If you find this project helpful and want to open a new Demat / Trading account, you can use the referral link below:
+
+👉 **[Open a Trading Account using my Referral Link](https://raviudal.github.io/portfolio_site/)** *(Replace with your direct broker referral link)*
+
+> *Affiliate Disclosure: If you sign up using this referral link, the developer may receive a small referral incentive from the broker at zero extra cost to you. This helps support free, open-source software development.*
 
 ---
 
@@ -89,7 +99,7 @@ Calculates true transaction costs according to official FYERS schedules:
 
 1. **Hobby & Educational Project**:
    - This software is an independent, open-source **hobby project** created solely for educational, research, and strategy practice purposes. Anyone is free to use, modify, or study it.
-   - This project is **not** affiliated with, endorsed by, or officially associated with FYERS Securities Private Limited or TradingView in any manner.
+   - This project is **not** affiliated with, endorsed by, or officially associated with any broker, exchange, or TradingView in any manner.
 
 2. **No Financial or Investment Advice**:
    - The creator and contributors of this project are **not** SEBI-registered advisors, brokers, or financial analysts. Nothing in this software, its source code, or documentation constitutes financial, investment, or trading advice.

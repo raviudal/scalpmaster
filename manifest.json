@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "FYERS ScalpMaster - Practice & Scalping HUD",
+  "name": "ScalpMaster - Practice & Scalping HUD",
   "version": "1.0.0",
-  "description": "Scalping practice HUD for FYERS Trading Terminal. Real-time PnL tracking, 1-click buy/sell scalping controls, hotkeys, and trade stats.",
+  "description": "High-speed scalping practice HUD for web trading terminals. Real-time PnL tracking, 1-click execution, draggable chart stop-loss, and trade stats.",
   "permissions": [
     "storage"
   ],

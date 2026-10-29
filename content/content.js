@@ -1069,7 +1069,7 @@
 
         <!-- Day Net P&L Summary (Gross, Charges, Net) -->
         <div class="fsm-day-pnl-card">
-          <div class="fsm-day-pnl-label">Day Net P&amp;L (After FYERS Charges)</div>
+          <div class="fsm-day-pnl-label">Day Net P&amp;L (After Brokerage &amp; Taxes)</div>
           <div class="fsm-day-pnl-value ${liveNetDayPnL > 0 ? 'fsm-pnl-positive' : liveNetDayPnL < 0 ? 'fsm-pnl-negative' : ''}" id="fsm-day-pnl-val">
             ${daySign}₹${liveNetDayPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
