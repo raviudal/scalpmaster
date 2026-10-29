@@ -3,6 +3,7 @@
 > **A high-speed scalping HUD & paper trading Chrome Extension (Manifest V3) for Web Trading Terminals.**
 
 [![Portfolio](https://img.shields.io/badge/Developer-Portfolio-blue?style=flat&logo=globe)](https://raviudal.github.io/portfolio_site/)
+[![Live Landing Page](https://img.shields.io/badge/Landing_Page-Live-cyan?style=flat&logo=googlechrome)](https://raviudal.github.io/scalpmaster/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Manifest V3](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-green)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 
