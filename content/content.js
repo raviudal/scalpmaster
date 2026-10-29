@@ -1,6 +1,6 @@
 /**
  * FYERS ScalpMaster - Practice & Scalping HUD
- * Chart Markers, Draggable Native Stop-Loss, Partial Close, and Instrument Lock
+ * Chart Markers, 100% Full-Width Draggable Native Stop-Loss, Every-Trade Counter, and Partial Close
  * Injected into trade.fyers.in
  */
 
@@ -20,7 +20,8 @@
   // 1. INJECT TRADINGVIEW CHART BRIDGE (Main World Execution)
   // -------------------------------------------------------------
   function injectChartBridge() {
-    if (document.getElementById('fsm-chart-bridge-script')) return;
+    const existingScript = document.getElementById('fsm-chart-bridge-script');
+    if (existingScript) existingScript.remove();
 
     const script = document.createElement('script');
     script.id = 'fsm-chart-bridge-script';
@@ -71,7 +72,7 @@
           }
         });
 
-        // Set / Update Interactive Stop Loss Line on Chart
+        // Set / Update Full-Width Draggable Stop Loss Line on Chart
         window.addEventListener('FSM_CHART_SET_SL', async (e) => {
           const chart = await getChart();
           if (!chart) return;
@@ -79,21 +80,40 @@
           if (!price || price <= 0) return;
 
           try {
+            // 1. Ensure TradingView has order lines enabled and set to extend across chart
+            try {
+              const model = chart._model;
+              if (model && model._properties && model._properties.tradingProperties) {
+                model._properties.tradingProperties.showOrders.setValue(true);
+                model._properties.tradingProperties.extendLeft.setValue(true);
+              }
+            } catch(err) {}
+
+            // 2. If existing line is valid on this chart, update price and extend left
             if (activeOrderLine) {
-              activeOrderLine.setPrice(price);
-              activeOrderLine.setText('STOP LOSS: ₹' + price.toFixed(2));
-              activeOrderLine.setQuantity(String(qty || ''));
-              return;
+              try {
+                activeOrderLine.setPrice(price);
+                activeOrderLine.setText('🛑 STOP LOSS: ₹' + price.toFixed(2));
+                activeOrderLine.setQuantity(String(qty || ''));
+                if (typeof activeOrderLine.setExtendLeft === 'function') {
+                  activeOrderLine.setExtendLeft(true);
+                }
+                return;
+              } catch(err) {
+                activeOrderLine = null;
+              }
             }
 
+            // 3. Create fresh order line with setExtendLeft(true)
             if (typeof chart.createOrderLine === 'function') {
               const order = await chart.createOrderLine();
               order.setPrice(price)
-                .setText('STOP LOSS: ₹' + price.toFixed(2))
+                .setText('🛑 STOP LOSS: ₹' + price.toFixed(2))
                 .setQuantity(String(qty || ''))
+                .setExtendLeft(true) // Crucial: Stretches the line 100% across the full chart!
+                .setLineWidth(2)
+                .setLineStyle(2) // Dashed line
                 .setLineColor('#EF4444')
-                .setLineStyle(2) // Dashed
-                .setLineWidth(1)
                 .setBodyBackgroundColor('#EF4444')
                 .setBodyTextColor('#FFFFFF')
                 .setBodyBorderColor('#B91C1C')
@@ -103,12 +123,13 @@
                 .setCancelButtonIconColor('#FFFFFF')
                 .onMove(() => {
                   const newPrice = order.getPrice();
-                  order.setText('STOP LOSS: ₹' + newPrice.toFixed(2));
+                  order.setText('🛑 STOP LOSS: ₹' + newPrice.toFixed(2));
                   window.dispatchEvent(new CustomEvent('FSM_SL_DRAGGED', { detail: { price: newPrice } }));
                 })
                 .onCancel(() => {
                   window.dispatchEvent(new CustomEvent('FSM_SL_CANCELLED'));
                 });
+
               activeOrderLine = order;
             }
           } catch(err) {
@@ -150,23 +171,24 @@
       state.activePosition.stopLoss = parseFloat(e.detail.price.toFixed(2));
       saveState();
       updateSlDisplay();
-      showToast('Stop Loss updated to ₹' + state.activePosition.stopLoss.toFixed(2));
+      showToast('Stop Loss dragged to ₹' + state.activePosition.stopLoss.toFixed(2));
     }
   });
 
   window.addEventListener('FSM_SL_CANCELLED', () => {
     if (state.activePosition) {
       state.activePosition.stopLoss = null;
+      state.activePosition.slPoints = null;
       saveState();
       updateSlDisplay();
-      showToast('Stop Loss removed');
+      showToast('Stop Loss cancelled');
     }
   });
 
   // -------------------------------------------------------------
   // 2. STATE DEFINITION
   // -------------------------------------------------------------
-  const STATE_KEY = 'fsm_state_v5';
+  const STATE_KEY = 'fsm_state_v6';
 
   let state = {
     mode: 'PRACTICE',
@@ -184,7 +206,8 @@
       grossPnL: 0,
       totalCharges: 0,
       netPnL: 0,
-      totalTrades: 0,
+      totalTrades: 0, // Counts EVERY executed order (Buy click = 1, Sell click = 2, etc.)
+      completedRounds: 0,
       wins: 0,
       losses: 0,
       winRate: 0,
@@ -517,9 +540,7 @@
       renderLtpTick();
     }
 
-    // -----------------------------------------------------------
-    // REQUIREMENT 5: AUTO STOP LOSS TRIGGER CHECK
-    // -----------------------------------------------------------
+    // Check Stop Loss auto-trigger
     checkStopLossTrigger();
 
     updatePnLDisplay();
@@ -529,7 +550,6 @@
   function checkStopLossTrigger() {
     if (!state.activePosition || !state.activePosition.stopLoss) return;
 
-    // Only trigger if we are tracking the active position's symbol
     if (state.symbol && state.activePosition.symbol && state.symbol !== state.activePosition.symbol) {
       return;
     }
@@ -541,12 +561,10 @@
 
     if (state.activePosition.side === 'BUY') {
       if (currentPrice <= sl) {
-        // Stop loss hit for Long
         triggerAutoStopLossExit(currentPrice);
       }
     } else if (state.activePosition.side === 'SELL') {
       if (currentPrice >= sl) {
-        // Stop loss hit for Short
         triggerAutoStopLossExit(currentPrice);
       }
     }
@@ -570,6 +588,9 @@
 
     // Remove SL Line from chart
     window.dispatchEvent(new CustomEvent('FSM_CHART_REMOVE_SL'));
+
+    // Count this exit order as a trade!
+    state.dayStats.totalTrades += 1;
 
     // Close position
     closeActivePositionInternal(pos.qty, triggerPrice, 'STOP LOSS');
@@ -700,7 +721,6 @@
         slPriceEl.textContent = 'None';
       }
     }
-    // Update active state of SL points buttons
     document.querySelectorAll('.fsm-sl-btn').forEach(btn => {
       const pts = parseFloat(btn.dataset.pts);
       if (state.activePosition && state.activePosition.slPoints === pts) {
@@ -712,13 +732,13 @@
   }
 
   // -------------------------------------------------------------
-  // 4. ORDER EXECUTION & POSITION REDUCTION (REQUIREMENTS 2 & 3)
+  // 4. ORDER EXECUTION & EVERY-TRADE COUNTING LOGIC
   // -------------------------------------------------------------
 
   function handleTradeButtonClick(side) {
     initAudio();
 
-    // REQUIREMENT 3: If any instrument trade is already open, do not allow trading another instrument
+    // REQUIREMENT: Prevent cross-instrument trading while in an open position
     if (state.activePosition && state.activePosition.symbol && state.symbol !== state.activePosition.symbol) {
       showToast(`⚠️ Trade locked on ${state.activePosition.symbol}! Square it off first.`);
       playSound('LOSS');
@@ -728,6 +748,9 @@
     const currentPrice = state.ltp > 0 ? state.ltp : 100.00;
     const qty = state.qty > 0 ? state.qty : state.lotSize;
     const nowStr = new Date().toLocaleTimeString();
+
+    // POINT 2: COUNT EVERY TRADE (Every executed order: 1 on buy, 2 on sell, etc.)
+    state.dayStats.totalTrades += 1;
 
     // Case 1: Currently FLAT (No open position) -> Open fresh position
     if (!state.activePosition) {
@@ -742,7 +765,7 @@
         slPoints: null
       };
 
-      // REQUIREMENT 4: Place execution marker on chart
+      // Place execution marker on chart
       window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', {
         detail: {
           side: side,
@@ -753,20 +776,19 @@
       }));
 
       playSound(side);
-      showToast(`${side} ${qty} ${state.symbol} @ ₹${currentPrice.toFixed(2)}`);
+      showToast(`${side} ${qty} ${state.symbol} @ ₹${currentPrice.toFixed(2)} (Trade #${state.dayStats.totalTrades})`);
       saveState();
       renderHUD();
       return;
     }
 
-    // Case 2: Adding to SAME DIRECTION position (BUY more into BUY, or SELL more into SELL)
+    // Case 2: Adding to SAME DIRECTION position
     if (state.activePosition.side === side) {
       const totalQty = state.activePosition.qty + qty;
       const avgPrice = ((state.activePosition.entryPrice * state.activePosition.qty) + (currentPrice * qty)) / totalQty;
       state.activePosition.qty = totalQty;
       state.activePosition.entryPrice = parseFloat(avgPrice.toFixed(2));
 
-      // Place additional marker
       window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', {
         detail: {
           side: side,
@@ -776,28 +798,22 @@
         }
       }));
 
-      // Update SL line quantity on chart if set
       if (state.activePosition.stopLoss) {
         window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
           detail: { price: state.activePosition.stopLoss, qty: totalQty }
         }));
       }
 
-      showToast(`Added ${qty} to ${side}. Total: ${totalQty} @ Avg ₹${state.activePosition.entryPrice.toFixed(2)}`);
+      showToast(`Added ${qty} to ${side}. Total: ${totalQty} @ Avg ₹${state.activePosition.entryPrice.toFixed(2)} (Trade #${state.dayStats.totalTrades})`);
       saveState();
       renderHUD();
       return;
     }
 
-    // -----------------------------------------------------------
-    // REQUIREMENT 2: OPPOSITE BUTTON PRESSED -> REDUCE / CLOSE
-    // If BUY is open and user clicks SELL: CLOSE/REDUCE BUY (DO NOT REVERSE)
-    // If SELL is open and user clicks BUY: CLOSE/REDUCE SELL (DO NOT REVERSE)
-    // -----------------------------------------------------------
+    // Case 3: OPPOSITE BUTTON PRESSED -> REDUCE / CLOSE
     const openQty = state.activePosition.qty;
     const closeQty = Math.min(openQty, qty);
 
-    // Place exit/reduction marker on chart
     window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', {
       detail: {
         side: side,
@@ -810,27 +826,26 @@
     if (closeQty >= openQty) {
       // Full close -> Position becomes FLAT
       closeActivePositionInternal(openQty, currentPrice, 'MANUAL EXIT');
-      showToast(`Closed full ${state.activePosition ? state.activePosition.side : 'trade'} (${openQty} Qty)`);
+      showToast(`Closed full ${state.activePosition ? state.activePosition.side : 'trade'} (${openQty} Qty) (Trade #${state.dayStats.totalTrades})`);
     } else {
       // Partial close -> Reduce quantity by selected qty
       closeActivePositionInternal(closeQty, currentPrice, 'PARTIAL EXIT');
       const remainingQty = openQty - closeQty;
       state.activePosition.qty = remainingQty;
 
-      // Update SL line quantity on chart
       if (state.activePosition.stopLoss) {
         window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
           detail: { price: state.activePosition.stopLoss, qty: remainingQty }
         }));
       }
 
-      showToast(`Closed ${closeQty} Qty. Remaining: ${remainingQty} Qty`);
+      showToast(`Closed ${closeQty} Qty. Remaining: ${remainingQty} Qty (Trade #${state.dayStats.totalTrades})`);
       saveState();
       renderHUD();
     }
   }
 
-  // Internal Position Closer (Handles full or partial close logging)
+  // Internal Position Closer
   function closeActivePositionInternal(closeQty, exitPrice, reason) {
     if (!state.activePosition) return;
     initAudio();
@@ -878,7 +893,7 @@
     };
 
     state.completedTrades.unshift(trade);
-    state.dayStats.totalTrades += 1;
+    state.dayStats.completedRounds = (state.dayStats.completedRounds || 0) + 1;
     state.dayStats.grossPnL = parseFloat((state.dayStats.grossPnL + grossPnl).toFixed(2));
     state.dayStats.totalCharges = parseFloat((state.dayStats.totalCharges + charges).toFixed(2));
     state.dayStats.netPnL = parseFloat((state.dayStats.grossPnL - state.dayStats.totalCharges).toFixed(2));
@@ -891,7 +906,7 @@
       playSound('LOSS');
     }
 
-    state.dayStats.winRate = Math.round((state.dayStats.wins / state.dayStats.totalTrades) * 100);
+    state.dayStats.winRate = Math.round((state.dayStats.wins / state.dayStats.completedRounds) * 100);
 
     if (state.dayStats.netPnL > state.dayStats.peakPnL) {
       state.dayStats.peakPnL = state.dayStats.netPnL;
@@ -911,7 +926,7 @@
     renderHUD();
   }
 
-  // Set Stop Loss by Points
+  // Set Stop Loss by Points (Places Full-Width Draggable Line on TV Chart)
   function setStopLossByPoints(points) {
     if (!state.activePosition) return;
     const entryPrice = state.activePosition.entryPrice;
@@ -927,12 +942,12 @@
     state.activePosition.stopLoss = slPrice;
     state.activePosition.slPoints = points;
 
-    // REQUIREMENT 5: Place/Update native draggable OrderLine on TradingView chart
+    // Dispatch event to TradingView Chart Bridge
     window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
       detail: { price: slPrice, qty: state.activePosition.qty }
     }));
 
-    showToast(`Stop Loss placed at ₹${slPrice.toFixed(2)} (${points} pts)`);
+    showToast(`Stop Loss line placed at ₹${slPrice.toFixed(2)} (${points} pts)`);
     saveState();
     updateSlDisplay();
   }
@@ -958,6 +973,7 @@
         totalCharges: 0,
         netPnL: 0,
         totalTrades: 0,
+        completedRounds: 0,
         wins: 0,
         losses: 0,
         winRate: 0,
@@ -980,7 +996,7 @@
       container = document.createElement('div');
       container.id = 'fyers-scalpmaster-hud';
       document.body.appendChild(container);
-      setupDrag(container); // REQUIREMENT 1: Clean drag only, no resize handles
+      setupDrag(container);
     }
 
     if (state.minimized) {
@@ -995,7 +1011,6 @@
     const liveNetDayPnL = liveGrossDayPnL - liveTotalCharges;
     const daySign = liveNetDayPnL >= 0 ? '+' : '';
 
-    // Check if locked to another instrument
     const isLockedToOther = state.activePosition && state.activePosition.symbol && state.symbol !== state.activePosition.symbol;
 
     container.innerHTML = `
@@ -1014,7 +1029,7 @@
       </div>
 
       <div class="fsm-body">
-        <!-- REQUIREMENT 3: Locked Warning Banner -->
+        <!-- Locked Warning Banner -->
         ${isLockedToOther ? `
           <div class="fsm-locked-banner">
             <span>🔒</span>
@@ -1048,7 +1063,7 @@
             </span>
           </div>
           <div class="fsm-stats-grid">
-            <div class="fsm-stat-item">
+            <div class="fsm-stat-item" title="Every executed order counted: Buy = 1, Sell/Exit = 2, etc.">
               <span class="fsm-stat-label">TRADES</span>
               <span class="fsm-stat-val">${state.dayStats.totalTrades}</span>
             </div>
@@ -1081,7 +1096,7 @@
           </div>
         </div>
 
-        <!-- Sleek Small Scalping Trade Buttons (With Partial Close & Lock logic) -->
+        <!-- Sleek Small Scalping Trade Buttons (Partial Close & Lock Logic) -->
         <div class="fsm-trade-btns">
           <button class="fsm-btn-small fsm-btn-buy" id="fsm-buy-btn" ${isLockedToOther ? 'disabled title="Locked to ' + state.activePosition.symbol + '"' : ''}>
             <span>${state.activePosition && state.activePosition.side === 'SELL' ? 'BUY TO COVER' : 'BUY'}</span>
@@ -1124,7 +1139,7 @@
                 <span>LTP: ₹${state.ltp.toFixed(2)}</span>
               </div>
 
-              <!-- REQUIREMENT 5: Stop Loss Section -->
+              <!-- Stop Loss Section -->
               <div class="fsm-sl-section">
                 <div class="fsm-sl-header">
                   <span class="fsm-sl-label">🛑 STOP LOSS</span>
@@ -1267,7 +1282,7 @@
       };
     });
 
-    // REQUIREMENT 2: Buy & Sell button reduction logic
+    // Buy & Sell Buttons
     const buyBtn = container.querySelector('#fsm-buy-btn');
     if (buyBtn) buyBtn.onclick = (e) => { e.preventDefault(); handleTradeButtonClick('BUY'); };
 
@@ -1280,9 +1295,11 @@
       exitBtn.onclick = (e) => {
         e.preventDefault();
         if (state.activePosition) {
+          // Count exit order as a trade!
+          state.dayStats.totalTrades += 1;
           const currentPrice = state.ltp > 0 ? state.ltp : state.activePosition.entryPrice;
           closeActivePositionInternal(state.activePosition.qty, currentPrice, 'MANUAL EXIT');
-          showToast('Squared off all open quantity');
+          showToast(`Squared off all open quantity (Trade #${state.dayStats.totalTrades})`);
         }
       };
     }
@@ -1311,7 +1328,7 @@
     if (resetBtn) resetBtn.onclick = () => resetDayStats();
   }
 
-  // REQUIREMENT 1: Clean Draggable HUD (NO edge/corner resizing handles)
+  // Draggable HUD
   function setupDrag(element) {
     let startX = 0, startY = 0;
 
@@ -1353,6 +1370,7 @@
     } else if (e.shiftKey && (e.key === 'X' || e.key === 'x')) {
       e.preventDefault();
       if (state.activePosition) {
+        state.dayStats.totalTrades += 1;
         const currentPrice = state.ltp > 0 ? state.ltp : state.activePosition.entryPrice;
         closeActivePositionInternal(state.activePosition.qty, currentPrice, 'MANUAL EXIT');
       }
@@ -1365,5 +1383,5 @@
   // Initialize
   loadState();
   scrapeActiveMarketData();
-  console.log('[ScalpMaster] Initialized with chart markers, native SL order lines, and partial close logic.');
+  console.log('[ScalpMaster] Initialized with full-width draggable SL and order-by-order trade count.');
 })();
