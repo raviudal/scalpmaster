@@ -1,57 +1,78 @@
-# ⚡ FYERS ScalpMaster - Scalping Practice Chrome Extension
+# ⚡ FYERS ScalpMaster
 
-A dedicated Chrome Extension tailored for the **FYERS Trading Terminal** ([trade.fyers.in](https://trade.fyers.in/)). It injects an interactive, draggable scalping HUD directly over your trading screen, providing 1-click execution, live unrealized & realized P&L tracking, completed trade logs, and daily performance metrics.
+> **A high-speed scalping HUD & paper trading Chrome Extension (Manifest V3) for the [FYERS Web Trading Terminal](https://trade.fyers.in/).**
+
+![FYERS ScalpMaster](icons/icon128.png)
 
 ---
 
 ## 🚀 Key Features
 
-* **Real-time Live P&L Display**:
-  - Live unrealized P&L calculated every 300ms from active positions and current market price.
-  - Overall **Day Net P&L** (sum of completed scalps + current open position).
-  - Dynamic color coding (green glow on profit, red glow on loss).
-* **1-Click Scalping Controls**:
-  - **BUY / LONG** and **SELL / SHORT** buttons with quick quantity selectors (25, 50, 75, 100 or custom qty).
-  - **SQUARE OFF**: Instantly exits open position at the current LTP.
-  - **REVERSE**: Closes the current position and instantly flips the trade to the opposite side.
-* **Practice vs. Live Mode**:
-  - **Practice Mode (Default)**: Practice scalping with virtual execution against real live FYERS market prices. Zero financial risk while honing your speed, discipline, and setups.
-  - **Live DOM Mode**: Directly triggers FYERS Web terminal order buttons on the screen.
-* **Trade History & Day Journal**:
-  - Automatically records every scalp taken (Symbol, Side, Quantity, Entry Price, Exit Price, Points, PnL, Time).
-  - Calculates **Win Rate %**, **Total Trades**, and **Win/Loss ratio**.
-* **Instant Hotkeys**:
-  - `Shift + B`: Quick Buy / Long
-  - `Shift + S`: Quick Sell / Short
-  - `Shift + X`: Instant Square Off
-  - `R`: Instant Position Reverse
-* **Audio Feedback**:
-  - Built-in sound effects (synthesized audio chimes for entries, winning trades, and losing exits).
-* **Draggable & Minimizable HUD**:
-  - Drag the overlay to any corner of your multi-monitor or widescreen layout.
-  - Minimize button collapses the HUD into a compact view so it won't block chart analysis.
+### 1. 🎯 Auto-Detection & Live Price Sync
+- **Active Instrument Detection**: Automatically tracks the active symbol from the TradingView chart without manual selection.
+- **Real-Time LTP**: Syncs with live market ticks for sub-second P&L updates.
+- **Smart Lot Size**: Auto-detects instrument type (Options, Futures, Equity) and sets correct lot sizes (e.g., 65 for Nifty, 15 for BankNifty) with `[+]` and `[-]` stepper controls.
+
+### 2. ⚡ High-Speed 1-Click Scalping Execution
+- **BUY / SELL Buttons**: Instant entry at the current market price with custom lot multipliers.
+- **Position Reduction / Partial Exit**: Clicking the opposing button reduces the open position by the selected lot size rather than flipping/reversing.
+- **Instrument Lock**: Automatically locks execution to the active trade's instrument until squared off to prevent accidental cross-trading.
+- **Every-Trade Counter**: Counts every individual trade execution (Buy = 1 trade, Sell/Exit = 2 trades).
+
+### 3. 🛑 Interactive Draggable Chart Stop-Loss
+- **TradingView Native Order Line**: Red dashed full-width stop-loss line (`chart.createOrderLine()`) rendered directly across the chart.
+- **Chart Dragging**: Click and drag the stop-loss line up or down; price updates automatically in the HUD.
+- **Automated SL Execution**: Real-time monitoring triggers an automatic market exit the instant price reaches or breaches your stop-loss level.
+- **Chart Execution Markers**: Visual markers (`BUY`, `SELL`, `EXIT`, `SL HIT`) placed directly on candles using `chart.createExecutionShape()`.
+
+### 4. 💰 Real FYERS Brokerage & Statutory Charges Calculator
+- Computes actual transaction costs according to FYERS official fee structure:
+  - **Flat Brokerage**: ₹20 per executed order (₹40 round trip for Options).
+  - **STT/CTT**: 0.1% on options sell side / equity delivery.
+  - **Exchange Turnover Charges**: NSE/BSE turnover fees.
+  - **GST**: 18% on (Brokerage + Turnover + SEBI fees).
+  - **Stamp Duty**: Statutory state stamp duties.
+- Displays both **Gross P&L** and **Net Realized P&L** (after all charges) in real-time.
+
+### 5. 📊 Extension Popup Analytics & Controls
+- **Show / Hide HUD Toggle**: One-click toggle (`👁️ Hide Order Window` / `🙈 Show Order Window`) to keep the TradingView chart clean whenever needed.
+- **15-Day Net Equity Curve**: Interactive visual chart plotting daily net P&L performance over time.
+- **Trade Log CSV Export**: Export historical trades with complete entry/exit timestamps, quantities, prices, gross P&L, charges, and net P&L with 30-day (default), 120-day, or all-time filters.
 
 ---
 
-## 📦 How to Install in Google Chrome
+## 📦 Installation Guide
 
-1. Open **Google Chrome** and go to `chrome://extensions/` in the address bar.
-2. In the top-right corner, toggle **Developer mode** to **ON**.
-3. Click the **"Load unpacked"** button in the top-left corner.
-4. Select the project folder:
+1. Clone or download this repository:
+   ```bash
+   git clone https://github.com/<your-username>/fyers-scalpmaster.git
    ```
+2. Open **Google Chrome** and navigate to:
+   ```text
+   chrome://extensions/
+   ```
+3. Enable **Developer mode** (toggle switch in the top-right corner).
+4. Click **Load unpacked** (top-left button).
+5. Select the project folder:
+   ```text
    C:\Users\ravi\Documents\antigravity\resilient-hertz
    ```
-5. The extension **"FYERS ScalpMaster - Practice & Scalping HUD"** will now appear in your extensions list.
+6. The extension **FYERS ScalpMaster** is now installed!
 
 ---
 
-## 🎯 How to Use
+## 🖥️ Usage
 
-1. Log into your FYERS account at [trade.fyers.in](https://trade.fyers.in/).
-2. You will see the **⚡ ScalpMaster HUD** appear on the top-right of your screen.
-3. Select your quantity (or click 25, 50, etc.).
-4. Click **BUY** or **SELL** (or use `Shift + B` / `Shift + S`).
-5. Watch your position tick live with the market price.
-6. Click **SQUARE OFF** (`Shift + X`) to bank your profit or cut your loss.
-7. Switch to the **Trade Log** tab inside the HUD to inspect your completed trades and day statistics!
+1. Open and log in to [trade.fyers.in](https://trade.fyers.in/).
+2. Open any chart (Index, Stocks, Options, or Futures).
+3. The **ScalpMaster HUD** will appear over your chart with the active symbol and live market price.
+4. Set your desired lot count using `[+]` / `[-]`.
+5. Click **BUY** or **SELL** to enter a trade.
+6. Click any quick SL button (e.g., `5 pts`, `10 pts`) to place a draggable Stop-Loss line directly on your TradingView chart.
+7. Click the extension toolbar icon anytime to view your **15-Day Equity Curve**, export your **Trade Log (CSV)**, or toggle HUD visibility.
+
+---
+
+## 🛡️ License
+
+MIT License. Designed for trading education, strategy backtesting, and scalping practice.
