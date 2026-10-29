@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FYERS ScalpMaster</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <div class="popup-header">
+      <div class="brand">
+        <span class="icon">⚡</span>
+        <span class="title">ScalpMaster</span>
+      </div>
+      <span class="badge">FYERS Web</span>
+    </div>
+
+    <!-- Day Summary Card -->
+    <div class="card pnl-card">
+      <div class="card-label">TODAY'S SCALPING P&amp;L</div>
+      <div class="pnl-value" id="pop-day-pnl">₹0.00</div>
+      <div class="stats-row">
+        <div class="stat"><span class="stat-lbl">TRADES</span><span id="pop-trades" class="stat-val">0</span></div>
+        <div class="stat"><span class="stat-lbl">WIN RATE</span><span id="pop-winrate" class="stat-val">0%</span></div>
+        <div class="stat"><span class="stat-lbl">W / L</span><span id="pop-wl" class="stat-val">0 / 0</span></div>
+      </div>
+    </div>
+
+    <!-- Quick Controls -->
+    <div class="section-title">Execution Hotkeys</div>
+    <div class="hotkey-grid">
+      <div class="hotkey-item"><kbd>Shift + B</kbd><span>Quick Buy / Long</span></div>
+      <div class="hotkey-item"><kbd>Shift + S</kbd><span>Quick Sell / Short</span></div>
+      <div class="hotkey-item"><kbd>Shift + X</kbd><span>Square Off / Exit</span></div>
+      <div class="hotkey-item"><kbd>R</kbd><span>Instant Reverse</span></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="action-buttons">
+      <button id="open-fyers-btn" class="btn btn-primary">Open FYERS Terminal</button>
+      <button id="reset-day-btn" class="btn btn-danger">Reset Day Stats</button>
+    </div>
+
+    <div class="footer">
+      <span>Works automatically on <b>trade.fyers.in</b></span>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

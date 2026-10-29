@@ -1,0 +1,505 @@
+/* FYERS ScalpMaster - Floating Practice Terminal Overlay */
+:root {
+  --fsm-bg: rgba(15, 23, 42, 0.92);
+  --fsm-card-bg: rgba(30, 41, 59, 0.7);
+  --fsm-border: rgba(51, 65, 85, 0.8);
+  --fsm-text: #f8fafc;
+  --fsm-text-muted: #94a3b8;
+  --fsm-green: #10b981;
+  --fsm-green-hover: #059669;
+  --fsm-green-bg: rgba(16, 185, 129, 0.15);
+  --fsm-red: #ef4444;
+  --fsm-red-hover: #dc2626;
+  --fsm-red-bg: rgba(239, 68, 68, 0.15);
+  --fsm-accent: #38bdf8;
+  --fsm-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+#fyers-scalpmaster-hud {
+  position: fixed;
+  top: 70px;
+  right: 25px;
+  width: 340px;
+  background: var(--fsm-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--fsm-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 99999999;
+  font-family: var(--fsm-font);
+  color: var(--fsm-text);
+  font-size: 13px;
+  user-select: none;
+  transition: box-shadow 0.2s, opacity 0.2s;
+}
+
+#fyers-scalpmaster-hud * {
+  box-sizing: border-box;
+}
+
+/* Header */
+.fsm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(30, 41, 59, 0.95);
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  border-bottom: 1px solid var(--fsm-border);
+  cursor: grab;
+}
+
+.fsm-header:active {
+  cursor: grabbing;
+}
+
+.fsm-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+
+.fsm-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.fsm-badge-practice {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.fsm-badge-live {
+  background: #ef4444;
+  color: #fff;
+}
+
+.fsm-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fsm-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--fsm-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.fsm-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* Main Body */
+.fsm-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 580px;
+  overflow-y: auto;
+}
+
+.fsm-body::-webkit-scrollbar {
+  width: 5px;
+}
+.fsm-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+/* Instrument & Live Quote Strip */
+.fsm-quote-strip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--fsm-card-bg);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.fsm-symbol-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #f1f5f9;
+  max-width: 170px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fsm-ltp-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.fsm-ltp-val {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: monospace;
+  color: #38bdf8;
+  letter-spacing: 0.5px;
+}
+
+/* Overall Day PnL Box */
+.fsm-day-pnl-card {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px 14px;
+  text-align: center;
+}
+
+.fsm-day-pnl-label {
+  font-size: 11px;
+  color: var(--fsm-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 4px;
+}
+
+.fsm-day-pnl-value {
+  font-size: 24px;
+  font-weight: 800;
+  font-family: monospace;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+}
+
+.fsm-pnl-positive {
+  color: #34d399 !important;
+  text-shadow: 0 0 12px rgba(52, 211, 153, 0.3);
+}
+
+.fsm-pnl-negative {
+  color: #f87171 !important;
+  text-shadow: 0 0 12px rgba(248, 113, 113, 0.3);
+}
+
+.fsm-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fsm-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.fsm-stat-label {
+  font-size: 10px;
+  color: var(--fsm-text-muted);
+}
+
+.fsm-stat-val {
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+/* Order Execution Controls */
+.fsm-order-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fsm-qty-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fsm-qty-input {
+  flex: 1;
+  background: #0f172a;
+  border: 1px solid var(--fsm-border);
+  border-radius: 6px;
+  color: #fff;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.fsm-qty-btn {
+  background: var(--fsm-card-bg);
+  border: 1px solid var(--fsm-border);
+  color: var(--fsm-text);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.fsm-qty-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: #64748b;
+}
+
+.fsm-trade-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.fsm-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 8px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  color: #fff;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.fsm-btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.fsm-btn-buy {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.fsm-btn-buy:hover {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
+}
+
+.fsm-btn-sell {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.fsm-btn-sell:hover {
+  background: linear-gradient(135deg, #f87171, #ef4444);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+}
+
+.fsm-btn-sub {
+  font-size: 10px;
+  opacity: 0.8;
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+.fsm-action-strip {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 8px;
+}
+
+.fsm-btn-exit {
+  background: #eab308;
+  color: #0f172a;
+  border: none;
+  border-radius: 6px;
+  padding: 8px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.fsm-btn-exit:hover {
+  background: #facc15;
+}
+
+.fsm-btn-exit:disabled {
+  background: #475569;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.fsm-btn-reverse {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.fsm-btn-reverse:hover {
+  background: #818cf8;
+}
+
+.fsm-btn-reverse:disabled {
+  background: #475569;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+/* Active Live Position Card */
+.fsm-position-card {
+  background: var(--fsm-card-bg);
+  border: 1px solid var(--fsm-border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fsm-position-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.fsm-pos-type {
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.fsm-type-long {
+  background: var(--fsm-green-bg);
+  color: var(--fsm-green);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.fsm-type-short {
+  background: var(--fsm-red-bg);
+  color: var(--fsm-red);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.fsm-position-pnl {
+  font-size: 17px;
+  font-weight: 800;
+  font-family: monospace;
+}
+
+.fsm-pos-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--fsm-text-muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: 4px;
+}
+
+.fsm-no-pos {
+  text-align: center;
+  color: var(--fsm-text-muted);
+  font-size: 12px;
+  padding: 12px 0;
+}
+
+/* Tabs & Orders List */
+.fsm-tab-nav {
+  display: flex;
+  border-bottom: 1px solid var(--fsm-border);
+  gap: 4px;
+}
+
+.fsm-tab {
+  flex: 1;
+  text-align: center;
+  padding: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fsm-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+
+.fsm-tab.active {
+  color: var(--fsm-accent);
+  border-bottom-color: var(--fsm-accent);
+}
+
+.fsm-orders-list {
+  max-height: 140px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fsm-order-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.fsm-order-side {
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+/* Minimized HUD pill */
+.fsm-minimized {
+  width: auto !important;
+  min-width: 180px;
+}
+.fsm-minimized .fsm-body {
+  display: none !important;
+}
+
+/* Toast alert inside HUD */
+.fsm-toast {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid var(--fsm-accent);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.fsm-toast.show {
+  opacity: 1;
+}
