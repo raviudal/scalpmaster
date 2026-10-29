@@ -17,6 +17,47 @@
   window.__fyers_scalpmaster_initialized = true;
 
   // -------------------------------------------------------------
+  // GOOGLE ANALYTICS 4 (GA4) TELEMETRY MODULE
+  // -------------------------------------------------------------
+  const GA_MEASUREMENT_ID = 'G-HVGVDSWP5D';
+  const GA_API_SECRET = 'fYXxGXj_TVy70h6-guS5iw';
+
+  async function logAnalyticsEvent(eventName, params = {}) {
+    try {
+      let clientData = await new Promise(resolve => {
+        chrome.storage.local.get(['ga_client_id'], res => resolve(res || {}));
+      });
+
+      let clientId = clientData.ga_client_id;
+      if (!clientId) {
+        clientId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+          ? crypto.randomUUID() 
+          : 'cid_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+        chrome.storage.local.set({ ga_client_id: clientId });
+      }
+
+      const url = `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_API_SECRET}`;
+      fetch(url, {
+        method: 'POST',
+        body: JSON.stringify({
+          client_id: clientId,
+          events: [
+            {
+              name: eventName,
+              params: {
+                ...params,
+                engagement_time_msec: 100
+              }
+            }
+          ]
+        })
+      }).catch(() => {});
+    } catch (e) {
+      // Fail silently to never block UI
+    }
+  }
+
+  // -------------------------------------------------------------
   // 1. INJECT TRADINGVIEW CHART BRIDGE (Main World Execution)
   // -------------------------------------------------------------
   function injectChartBridge() {
@@ -788,6 +829,11 @@
 
       playSound(side);
       showToast(`${side} ${qty} ${state.symbol} @ ₹${currentPrice.toFixed(2)} (Trade #${state.dayStats.totalTrades})`);
+      logAnalyticsEvent('scalp_order_executed', {
+        side: side,
+        symbol: state.symbol || 'UNKNOWN',
+        qty: qty
+      });
       saveState();
       renderHUD();
       return;
@@ -1435,5 +1481,9 @@
   // Initialize
   loadState();
   scrapeActiveMarketData();
+  logAnalyticsEvent('hud_session_active', {
+    version: '1.0.0',
+    platform: 'fyers_web'
+  });
   console.log('[ScalpMaster] Initialized with robust self-healing SL order lines.');
 })();

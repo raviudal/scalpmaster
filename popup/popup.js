@@ -20,6 +20,45 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentCompletedTrades = [];
   let isHudVisible = true;
 
+  const GA_MEASUREMENT_ID = 'G-HVGVDSWP5D';
+  const GA_API_SECRET = 'fYXxGXj_TVy70h6-guS5iw';
+
+  async function logAnalyticsEvent(eventName, params = {}) {
+    try {
+      let clientData = await new Promise(resolve => {
+        chrome.storage.local.get(['ga_client_id'], res => resolve(res || {}));
+      });
+
+      let clientId = clientData.ga_client_id;
+      if (!clientId) {
+        clientId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+          ? crypto.randomUUID() 
+          : 'cid_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+        chrome.storage.local.set({ ga_client_id: clientId });
+      }
+
+      const url = `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_API_SECRET}`;
+      fetch(url, {
+        method: 'POST',
+        body: JSON.stringify({
+          client_id: clientId,
+          events: [
+            {
+              name: eventName,
+              params: {
+                ...params,
+                engagement_time_msec: 100
+              }
+            }
+          ]
+        })
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
+  // Log popup open session
+  logAnalyticsEvent('popup_opened', { view: 'analytics_dashboard' });
+
   // -------------------------------------------------------------
   // 1. LOAD DATA & RENDER 15-DAY EQUITY CURVE
   // -------------------------------------------------------------
