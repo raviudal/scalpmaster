@@ -1,6 +1,6 @@
 /**
  * FYERS ScalpMaster - Practice & Scalping HUD
- * Chart Markers, 100% Full-Width Draggable Native Stop-Loss, Every-Trade Counter, and Partial Close
+ * Chart Markers, Robust Draggable Stop-Loss, Every-Trade Counter, and Partial Close
  * Injected into trade.fyers.in
  */
 
@@ -33,7 +33,10 @@
         async function getChart() {
           if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
             try {
-              return window.tvWidget.activeChart();
+              const c = window.tvWidget.activeChart();
+              if (c && typeof c.createOrderLine === 'function') {
+                return c;
+              }
             } catch(e) {}
           }
           return null;
@@ -72,15 +75,18 @@
           }
         });
 
-        // Set / Update Full-Width Draggable Stop Loss Line on Chart
+        // Set / Recreate Draggable Stop Loss Line on Chart
         window.addEventListener('FSM_CHART_SET_SL', async (e) => {
           const chart = await getChart();
-          if (!chart) return;
+          if (!chart) {
+            console.warn('[ScalpMaster Bridge] Chart not ready yet for Stop Loss');
+            return;
+          }
           const { price, qty } = e.detail || {};
           if (!price || price <= 0) return;
 
           try {
-            // 1. Ensure TradingView has order lines enabled and set to extend across chart
+            // Ensure TradingView has trading order lines enabled
             try {
               const model = chart._model;
               if (model && model._properties && model._properties.tradingProperties) {
@@ -89,28 +95,21 @@
               }
             } catch(err) {}
 
-            // 2. If existing line is valid on this chart, update price and extend left
+            // Always safely remove any previous order line to prevent orphaned references
             if (activeOrderLine) {
               try {
-                activeOrderLine.setPrice(price);
-                activeOrderLine.setText('🛑 STOP LOSS: ₹' + price.toFixed(2));
-                activeOrderLine.setQuantity(String(qty || ''));
-                if (typeof activeOrderLine.setExtendLeft === 'function') {
-                  activeOrderLine.setExtendLeft(true);
-                }
-                return;
-              } catch(err) {
-                activeOrderLine = null;
-              }
+                activeOrderLine.remove();
+              } catch(err) {}
+              activeOrderLine = null;
             }
 
-            // 3. Create fresh order line with setExtendLeft(true)
+            // Create fresh order line cleanly
             if (typeof chart.createOrderLine === 'function') {
               const order = await chart.createOrderLine();
               order.setPrice(price)
                 .setText('🛑 STOP LOSS: ₹' + price.toFixed(2))
                 .setQuantity(String(qty || ''))
-                .setExtendLeft(true) // Crucial: Stretches the line 100% across the full chart!
+                .setExtendLeft(true) // Full width across historical candles
                 .setLineWidth(2)
                 .setLineStyle(2) // Dashed line
                 .setLineColor('#EF4444')
@@ -127,13 +126,16 @@
                   window.dispatchEvent(new CustomEvent('FSM_SL_DRAGGED', { detail: { price: newPrice } }));
                 })
                 .onCancel(() => {
+                  activeOrderLine = null;
                   window.dispatchEvent(new CustomEvent('FSM_SL_CANCELLED'));
                 });
 
               activeOrderLine = order;
+              console.log('[ScalpMaster Bridge] Created fresh Stop Loss OrderLine at ₹' + price);
             }
           } catch(err) {
-            console.warn('[ScalpMaster Bridge] OrderLine error:', err);
+            console.error('[ScalpMaster Bridge] Failed to create OrderLine:', err);
+            activeOrderLine = null;
           }
         });
 
@@ -188,7 +190,7 @@
   // -------------------------------------------------------------
   // 2. STATE DEFINITION
   // -------------------------------------------------------------
-  const STATE_KEY = 'fsm_state_v6';
+  const STATE_KEY = 'fsm_state_v7';
 
   let state = {
     mode: 'PRACTICE',
@@ -357,11 +359,9 @@
           state.minimized = !!saved.minimized;
           state.mode = saved.mode || 'PRACTICE';
 
-          // Restore SL line on chart if position had one
+          // Restore SL line on chart once chart is fully ready
           if (state.activePosition && state.activePosition.stopLoss) {
-            window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
-              detail: { price: state.activePosition.stopLoss, qty: state.activePosition.qty }
-            }));
+            restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty);
           }
         }
         renderHUD();
@@ -369,6 +369,16 @@
     } else {
       renderHUD();
     }
+  }
+
+  // Helper to restore SL on initial load with retry until TradingView is ready
+  function restoreChartStopLoss(price, qty, attempts = 0) {
+    if (attempts > 15) return;
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
+        detail: { price: price, qty: qty }
+      }));
+    }, 1000 + attempts * 500);
   }
 
   // Save State
@@ -738,7 +748,6 @@
   function handleTradeButtonClick(side) {
     initAudio();
 
-    // REQUIREMENT: Prevent cross-instrument trading while in an open position
     if (state.activePosition && state.activePosition.symbol && state.symbol !== state.activePosition.symbol) {
       showToast(`⚠️ Trade locked on ${state.activePosition.symbol}! Square it off first.`);
       playSound('LOSS');
@@ -749,7 +758,7 @@
     const qty = state.qty > 0 ? state.qty : state.lotSize;
     const nowStr = new Date().toLocaleTimeString();
 
-    // POINT 2: COUNT EVERY TRADE (Every executed order: 1 on buy, 2 on sell, etc.)
+    // EVERY-TRADE COUNT: increments by 1 on every executed order
     state.dayStats.totalTrades += 1;
 
     // Case 1: Currently FLAT (No open position) -> Open fresh position
@@ -926,7 +935,7 @@
     renderHUD();
   }
 
-  // Set Stop Loss by Points (Places Full-Width Draggable Line on TV Chart)
+  // Set Stop Loss by Points (Always cleanly recreates full-width draggable line on TV chart)
   function setStopLossByPoints(points) {
     if (!state.activePosition) return;
     const entryPrice = state.activePosition.entryPrice;
@@ -942,12 +951,12 @@
     state.activePosition.stopLoss = slPrice;
     state.activePosition.slPoints = points;
 
-    // Dispatch event to TradingView Chart Bridge
+    // Dispatch fresh event to TradingView Chart Bridge
     window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
       detail: { price: slPrice, qty: state.activePosition.qty }
     }));
 
-    showToast(`Stop Loss line placed at ₹${slPrice.toFixed(2)} (${points} pts)`);
+    showToast(`Stop Loss placed at ₹${slPrice.toFixed(2)} (${points} pts)`);
     saveState();
     updateSlDisplay();
   }
@@ -1295,7 +1304,6 @@
       exitBtn.onclick = (e) => {
         e.preventDefault();
         if (state.activePosition) {
-          // Count exit order as a trade!
           state.dayStats.totalTrades += 1;
           const currentPrice = state.ltp > 0 ? state.ltp : state.activePosition.entryPrice;
           closeActivePositionInternal(state.activePosition.qty, currentPrice, 'MANUAL EXIT');
@@ -1383,5 +1391,5 @@
   // Initialize
   loadState();
   scrapeActiveMarketData();
-  console.log('[ScalpMaster] Initialized with full-width draggable SL and order-by-order trade count.');
+  console.log('[ScalpMaster] Initialized with robust self-healing SL order lines.');
 })();
