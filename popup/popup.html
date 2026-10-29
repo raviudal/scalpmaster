@@ -7,38 +7,60 @@
 </head>
 <body>
   <div class="popup-container">
+    <!-- Header -->
     <div class="popup-header">
       <div class="brand">
         <span class="icon">⚡</span>
         <span class="title">ScalpMaster</span>
       </div>
-      <span class="badge">FYERS Web</span>
+      <span class="badge">FYERS Terminal</span>
     </div>
 
-    <!-- Day Summary Card -->
-    <div class="card pnl-card">
-      <div class="card-label">TODAY'S SCALPING P&amp;L</div>
-      <div class="pnl-value" id="pop-day-pnl">₹0.00</div>
-      <div class="stats-row">
-        <div class="stat"><span class="stat-lbl">TRADES</span><span id="pop-trades" class="stat-val">0</span></div>
-        <div class="stat"><span class="stat-lbl">WIN RATE</span><span id="pop-winrate" class="stat-val">0%</span></div>
-        <div class="stat"><span class="stat-lbl">W / L</span><span id="pop-wl" class="stat-val">0 / 0</span></div>
+    <!-- 15-Day Equity Curve Section (Requirement 4) -->
+    <div class="card chart-card">
+      <div class="chart-header">
+        <div>
+          <div class="card-label">15-DAY NET EQUITY CURVE</div>
+          <div class="equity-value" id="pop-equity-val">₹0.00</div>
+        </div>
+        <div class="equity-stats" id="pop-equity-meta">
+          <span id="pop-trade-count">0 trades</span>
+        </div>
+      </div>
+      <div class="canvas-container">
+        <canvas id="equity-canvas" width="280" height="130"></canvas>
+      </div>
+      <div class="chart-dates">
+        <span id="chart-start-date">15 days ago</span>
+        <span id="chart-end-date">Today</span>
       </div>
     </div>
 
-    <!-- Quick Controls -->
-    <div class="section-title">Execution Hotkeys</div>
-    <div class="hotkey-grid">
-      <div class="hotkey-item"><kbd>Shift + B</kbd><span>Quick Buy / Long</span></div>
-      <div class="hotkey-item"><kbd>Shift + S</kbd><span>Quick Sell / Short</span></div>
-      <div class="hotkey-item"><kbd>Shift + X</kbd><span>Square Off / Exit</span></div>
-      <div class="hotkey-item"><kbd>R</kbd><span>Instant Reverse</span></div>
+    <!-- Toggle HUD Button (Requirement 1) -->
+    <button id="toggle-hud-btn" class="btn btn-hud-toggle">
+      <span id="toggle-hud-icon">👁️</span>
+      <span id="toggle-hud-text">Hide Order Window on Chart</span>
+    </button>
+
+    <!-- CSV Export Section (Requirement 2) -->
+    <div class="card export-card">
+      <div class="card-label">EXPORT TRADE LOG (CSV)</div>
+      <div class="export-row">
+        <select id="csv-range-select" class="select-input">
+          <option value="30" selected>Last 30 Days (Default)</option>
+          <option value="120">Last 120 Days</option>
+          <option value="all">All Trades History</option>
+        </select>
+        <button id="download-csv-btn" class="btn btn-download">
+          <span>📥 Download</span>
+        </button>
+      </div>
     </div>
 
-    <!-- Actions -->
+    <!-- Quick Actions -->
     <div class="action-buttons">
       <button id="open-fyers-btn" class="btn btn-primary">Open FYERS Terminal</button>
-      <button id="reset-day-btn" class="btn btn-danger">Reset Day Stats</button>
+      <button id="reset-day-btn" class="btn btn-danger">Reset Today's Stats</button>
     </div>
 
     <div class="footer">

@@ -216,6 +216,7 @@
       peakPnL: 0,
       maxDrawdown: 0
     },
+    hudVisible: true,
     minimized: false,
     soundEnabled: true
   };
@@ -355,6 +356,7 @@
           state.completedTrades = saved.completedTrades || [];
           state.activePosition = saved.activePosition || null;
           state.lots = saved.lots || 1;
+          state.hudVisible = saved.hudVisible !== undefined ? saved.hudVisible : true;
           state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
           state.minimized = !!saved.minimized;
           state.mode = saved.mode || 'PRACTICE';
@@ -1008,6 +1010,12 @@
       setupDrag(container);
     }
 
+    if (state.hudVisible === false) {
+      container.style.display = 'none';
+    } else {
+      container.style.display = 'block';
+    }
+
     if (state.minimized) {
       container.classList.add('fsm-minimized');
     } else {
@@ -1109,18 +1117,16 @@
         <div class="fsm-trade-btns">
           <button class="fsm-btn-small fsm-btn-buy" id="fsm-buy-btn" ${isLockedToOther ? 'disabled title="Locked to ' + state.activePosition.symbol + '"' : ''}>
             <span>${state.activePosition && state.activePosition.side === 'SELL' ? 'BUY TO COVER' : 'BUY'}</span>
-            <span class="fsm-shortcut">[⇧B]</span>
           </button>
           <button class="fsm-btn-small fsm-btn-sell" id="fsm-btn-sell" ${isLockedToOther ? 'disabled title="Locked to ' + state.activePosition.symbol + '"' : ''}>
             <span>${state.activePosition && state.activePosition.side === 'BUY' ? 'SELL TO CLOSE' : 'SELL'}</span>
-            <span class="fsm-shortcut">[⇧S]</span>
           </button>
         </div>
 
         <!-- Full Square Off Button -->
         <div class="fsm-action-strip">
           <button class="fsm-btn-exit" id="fsm-exit-btn" ${!state.activePosition ? 'disabled' : ''}>
-            SQUARE OFF ALL [⇧X]
+            SQUARE OFF ALL
           </button>
         </div>
 
@@ -1365,25 +1371,39 @@
     };
   }
 
-  // Keyboard Shortcuts
-  window.addEventListener('keydown', (e) => {
-    if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
-
-    if (e.shiftKey && (e.key === 'B' || e.key === 'b')) {
-      e.preventDefault();
-      handleTradeButtonClick('BUY');
-    } else if (e.shiftKey && (e.key === 'S' || e.key === 's')) {
-      e.preventDefault();
-      handleTradeButtonClick('SELL');
-    } else if (e.shiftKey && (e.key === 'X' || e.key === 'x')) {
-      e.preventDefault();
-      if (state.activePosition) {
-        state.dayStats.totalTrades += 1;
-        const currentPrice = state.ltp > 0 ? state.ltp : state.activePosition.entryPrice;
-        closeActivePositionInternal(state.activePosition.qty, currentPrice, 'MANUAL EXIT');
+  // Chrome Runtime Message Listener for Extension Popup
+  if (chrome && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
+      if (req.action === 'SET_HUD_VISIBILITY') {
+        const hud = document.getElementById('fyers-scalpmaster-hud');
+        state.hudVisible = req.visible !== false;
+        if (hud) {
+          hud.style.display = state.hudVisible ? 'block' : 'none';
+        }
+        saveState();
+        sendResponse({ success: true, visible: state.hudVisible });
+      } else if (req.action === 'RESET_STATE') {
+        state.activePosition = null;
+        state.completedTrades = [];
+        state.dayStats = {
+          grossPnL: 0,
+          totalCharges: 0,
+          netPnL: 0,
+          totalTrades: 0,
+          completedRounds: 0,
+          wins: 0,
+          losses: 0,
+          winRate: 0,
+          peakPnL: 0,
+          maxDrawdown: 0
+        };
+        window.dispatchEvent(new CustomEvent('FSM_CHART_CLEAR_ALL'));
+        saveState();
+        renderHUD();
+        sendResponse({ success: true });
       }
-    }
-  });
+    });
+  }
 
   // Start single loop
   window.__fsm_interval = setInterval(scrapeActiveMarketData, 100);

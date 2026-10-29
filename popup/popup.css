@@ -5,19 +5,19 @@
 }
 
 body {
-  width: 300px;
+  width: 320px;
   background-color: #0f172a;
   color: #f8fafc;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-size: 13px;
+  font-size: 12px;
   user-select: none;
 }
 
 .popup-container {
-  padding: 16px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .popup-header {
@@ -38,7 +38,7 @@ body {
 
 .brand .title {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.5px;
   color: #fff;
 }
@@ -47,121 +47,185 @@ body {
   background: #1e293b;
   color: #38bdf8;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
   border: 1px solid rgba(56, 189, 248, 0.2);
 }
 
 .card {
-  background: rgba(30, 41, 59, 0.8);
+  background: rgba(30, 41, 59, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  padding: 12px;
-}
-
-.pnl-card {
-  text-align: center;
+  border-radius: 8px;
+  padding: 10px;
 }
 
 .card-label {
-  font-size: 10px;
+  font-size: 9px;
   color: #94a3b8;
-  font-weight: 600;
-  letter-spacing: 0.8px;
-  margin-bottom: 4px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin-bottom: 2px;
 }
 
-.pnl-value {
-  font-size: 22px;
-  font-weight: 800;
+/* 15-Day Equity Chart Card */
+.chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.equity-value {
+  font-size: 18px;
+  font-weight: 900;
   font-family: monospace;
   color: #94a3b8;
+  line-height: 1.1;
 }
 
 .pnl-positive {
   color: #34d399 !important;
+  text-shadow: 0 0 10px rgba(52, 211, 153, 0.3);
 }
 
 .pnl-negative {
   color: #f87171 !important;
+  text-shadow: 0 0 10px rgba(248, 113, 113, 0.3);
 }
 
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.stat-lbl {
-  font-size: 9px;
+.equity-stats {
+  font-size: 10px;
   color: #94a3b8;
+  font-weight: 600;
 }
 
-.stat-val {
-  font-size: 12px;
-  font-weight: 700;
-  margin-top: 2px;
+.canvas-container {
+  width: 100%;
+  height: 130px;
+  background: rgba(15, 23, 42, 0.7);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+  position: relative;
 }
 
-.section-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+#equity-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
-.hotkey-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  background: rgba(15, 23, 42, 0.6);
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.hotkey-item {
+.chart-dates {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
+  font-size: 9px;
+  color: #64748b;
+  margin-top: 1px;
 }
 
-kbd {
-  background: #1e293b;
-  border: 1px solid #475569;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
+/* Toggle HUD Button */
+.btn-hud-toggle {
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border: 1px solid #38bdf8;
   color: #38bdf8;
-  box-shadow: 0 2px 0 #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s;
 }
 
+.btn-hud-toggle:hover {
+  background: rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+}
+
+.btn-hud-hidden {
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
+.btn-hud-hidden:hover {
+  background: rgba(245, 158, 11, 0.15);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+}
+
+/* Export CSV Card */
+.export-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.export-row {
+  display: grid;
+  grid-template-columns: 1.8fr 1.2fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.select-input {
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f8fafc;
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+}
+
+.select-input:focus {
+  border-color: #38bdf8;
+}
+
+.btn-download {
+  background: #059669;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+
+.btn-download:hover {
+  background: #10b981;
+}
+
+/* Quick Actions */
 .action-buttons {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .btn {
   width: 100%;
-  padding: 8px;
+  padding: 7px;
   border-radius: 6px;
   border: none;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -176,18 +240,18 @@ kbd {
 }
 
 .btn-danger {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.3);
   color: #f87171;
 }
 
 .btn-danger:hover {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.22);
 }
 
 .footer {
   text-align: center;
-  font-size: 10px;
+  font-size: 9px;
   color: #64748b;
-  margin-top: 4px;
+  margin-top: 2px;
 }
