@@ -70,39 +70,160 @@
       (function() {
         let activeOrderLine = null;
         let createdShapes = [];
+        let currentActiveSl = null; // { price, qty }
 
-        async function getChart() {
-          if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
-            try {
-              const c = window.tvWidget.activeChart();
-              if (c && typeof c.createOrderLine === 'function') {
-                return c;
+        // Polling helper that waits up to timeoutMs for TradingView chart to be interactive
+        function waitForChart(timeoutMs = 20000) {
+          return new Promise((resolve) => {
+            const start = Date.now();
+            const check = () => {
+              try {
+                if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
+                  const c = window.tvWidget.activeChart();
+                  if (c && typeof c.createOrderLine === 'function') {
+                    return resolve(c);
+                  }
+                }
+              } catch(e) {}
+              if (Date.now() - start > timeoutMs) {
+                return resolve(null);
               }
-            } catch(e) {}
-          }
-          return null;
+              setTimeout(check, 250);
+            };
+            check();
+          });
         }
 
-        // Place Execution Marker on Chart
+        // Render / Re-render Order Line cleanly on the active TradingView chart
+        async function renderOrderLine(price, qty) {
+          if (!price || price <= 0) return;
+          const chart = await waitForChart(15000);
+          if (!chart) {
+            console.warn('[ScalpMaster Bridge] Chart not ready for SL line');
+            return;
+          }
+
+          try {
+            // Enable TradingView trading order lines & extend-left properties
+            try {
+              const model = chart._model || (chart._chartWidget && chart._chartWidget._model);
+              if (model && model._properties && model._properties.tradingProperties) {
+                model._properties.tradingProperties.showOrders.setValue(true);
+                model._properties.tradingProperties.extendLeft.setValue(true);
+              }
+            } catch(err) {}
+
+            // Remove any existing active order line safely to prevent duplicates
+            if (activeOrderLine) {
+              try {
+                activeOrderLine.remove();
+              } catch(err) {}
+              activeOrderLine = null;
+            }
+
+            const order = await chart.createOrderLine();
+            order.setPrice(price)
+              .setText('🛑 STOP LOSS: ₹' + price.toFixed(2))
+              .setQuantity(String(qty || ''))
+              .setExtendLeft(true) // Full width across candles
+              .setLineWidth(2)
+              .setLineStyle(2) // Dashed line
+              .setLineColor('#EF4444')
+              .setBodyBackgroundColor('#EF4444')
+              .setBodyTextColor('#FFFFFF')
+              .setBodyBorderColor('#B91C1C')
+              .setQuantityBackgroundColor('#B91C1C')
+              .setQuantityTextColor('#FFFFFF')
+              .setCancelButtonBackgroundColor('#B91C1C')
+              .setCancelButtonIconColor('#FFFFFF')
+              .onMove(() => {
+                const newPrice = order.getPrice();
+                if (newPrice && newPrice > 0) {
+                  order.setText('🛑 STOP LOSS: ₹' + newPrice.toFixed(2));
+                  if (currentActiveSl) currentActiveSl.price = newPrice;
+                  window.dispatchEvent(new CustomEvent('FSM_SL_DRAGGED', { detail: { price: newPrice } }));
+                }
+              })
+              .onCancel(() => {
+                activeOrderLine = null;
+                currentActiveSl = null;
+                window.dispatchEvent(new CustomEvent('FSM_SL_CANCELLED'));
+              });
+
+            activeOrderLine = order;
+            currentActiveSl = { price, qty };
+            console.log('[ScalpMaster Bridge] Rendered Stop Loss OrderLine at ₹' + price);
+          } catch(err) {
+            console.error('[ScalpMaster Bridge] OrderLine creation error:', err);
+            activeOrderLine = null;
+          }
+        }
+
+        // Set / Recreate Stop Loss
+        window.addEventListener('FSM_CHART_SET_SL', async (e) => {
+          const { price, qty } = e.detail || {};
+          if (!price || price <= 0) return;
+          currentActiveSl = { price, qty };
+          await renderOrderLine(price, qty);
+        });
+
+        // Periodic or Event-Driven SL Health Check
+        window.addEventListener('FSM_CHART_ENSURE_SL', async (e) => {
+          const { price, qty } = e.detail || {};
+          if (!price || price <= 0) return;
+          currentActiveSl = { price, qty };
+          if (!activeOrderLine) {
+            await renderOrderLine(price, qty);
+          }
+        });
+
+        // Remove Stop Loss Line
+        window.addEventListener('FSM_CHART_REMOVE_SL', () => {
+          currentActiveSl = null;
+          if (activeOrderLine) {
+            try {
+              activeOrderLine.remove();
+            } catch(e) {}
+            activeOrderLine = null;
+          }
+        });
+
+        // Place Execution Marker on Chart (Pins arrow cleanly to active/latest candle)
         window.addEventListener('FSM_CHART_PLACE_MARKER', async (e) => {
-          const chart = await getChart();
+          const chart = await waitForChart(10000);
           if (!chart) return;
-          const { side, price, text, qty } = e.detail || {};
+          const { side, price, text, qty, time } = e.detail || {};
+          if (!price || price <= 0) return;
+
+          // Determine accurate candle timestamp in seconds
+          let markerTime = time;
+          if (!markerTime) {
+            try {
+              const vr = chart.getVisibleRange();
+              if (vr && vr.to) {
+                markerTime = Math.floor(vr.to) - 60;
+              }
+            } catch(err) {}
+            if (!markerTime) markerTime = Math.floor(Date.now() / 1000);
+          }
+
           try {
             if (typeof chart.createExecutionShape === 'function') {
               const exec = await chart.createExecutionShape();
-              exec.setPrice(price)
+              exec.setTime(markerTime)
+                .setPrice(price)
                 .setDirection(side.toLowerCase() === 'buy' ? 'buy' : 'sell')
-                .setText(text || (side.toUpperCase() + ' ' + qty + ' @ ₹' + price))
+                .setText(text || (side.toUpperCase() + ' ' + (qty || '') + ' @ ₹' + price.toFixed(2)))
                 .setArrowColor(side.toLowerCase() === 'buy' ? '#00E676' : '#FF5252')
                 .setTextColor(side.toLowerCase() === 'buy' ? '#00E676' : '#FF5252');
               createdShapes.push(exec);
+              console.log('[ScalpMaster Bridge] Placed execution marker:', text || side, '@', price, 'time:', markerTime);
             } else if (typeof chart.createShape === 'function') {
               const shapeId = await chart.createShape(
-                { price: price },
+                { time: markerTime, price: price },
                 {
                   shape: side.toLowerCase() === 'buy' ? 'arrow_up' : 'arrow_down',
-                  text: text || (side.toUpperCase() + ' @ ₹' + price),
+                  text: text || (side.toUpperCase() + ' @ ₹' + price.toFixed(2)),
                   overrides: {
                     color: side.toLowerCase() === 'buy' ? '#00E676' : '#FF5252',
                     fontsize: 11
@@ -112,86 +233,13 @@
               createdShapes.push({ remove: () => chart.removeEntity(shapeId) });
             }
           } catch(err) {
-            console.warn('[ScalpMaster Bridge] Marker error:', err);
-          }
-        });
-
-        // Set / Recreate Draggable Stop Loss Line on Chart
-        window.addEventListener('FSM_CHART_SET_SL', async (e) => {
-          const chart = await getChart();
-          if (!chart) {
-            console.warn('[ScalpMaster Bridge] Chart not ready yet for Stop Loss');
-            return;
-          }
-          const { price, qty } = e.detail || {};
-          if (!price || price <= 0) return;
-
-          try {
-            // Ensure TradingView has trading order lines enabled
-            try {
-              const model = chart._model;
-              if (model && model._properties && model._properties.tradingProperties) {
-                model._properties.tradingProperties.showOrders.setValue(true);
-                model._properties.tradingProperties.extendLeft.setValue(true);
-              }
-            } catch(err) {}
-
-            // Always safely remove any previous order line to prevent orphaned references
-            if (activeOrderLine) {
-              try {
-                activeOrderLine.remove();
-              } catch(err) {}
-              activeOrderLine = null;
-            }
-
-            // Create fresh order line cleanly
-            if (typeof chart.createOrderLine === 'function') {
-              const order = await chart.createOrderLine();
-              order.setPrice(price)
-                .setText('🛑 STOP LOSS: ₹' + price.toFixed(2))
-                .setQuantity(String(qty || ''))
-                .setExtendLeft(true) // Full width across historical candles
-                .setLineWidth(2)
-                .setLineStyle(2) // Dashed line
-                .setLineColor('#EF4444')
-                .setBodyBackgroundColor('#EF4444')
-                .setBodyTextColor('#FFFFFF')
-                .setBodyBorderColor('#B91C1C')
-                .setQuantityBackgroundColor('#B91C1C')
-                .setQuantityTextColor('#FFFFFF')
-                .setCancelButtonBackgroundColor('#B91C1C')
-                .setCancelButtonIconColor('#FFFFFF')
-                .onMove(() => {
-                  const newPrice = order.getPrice();
-                  order.setText('🛑 STOP LOSS: ₹' + newPrice.toFixed(2));
-                  window.dispatchEvent(new CustomEvent('FSM_SL_DRAGGED', { detail: { price: newPrice } }));
-                })
-                .onCancel(() => {
-                  activeOrderLine = null;
-                  window.dispatchEvent(new CustomEvent('FSM_SL_CANCELLED'));
-                });
-
-              activeOrderLine = order;
-              console.log('[ScalpMaster Bridge] Created fresh Stop Loss OrderLine at ₹' + price);
-            }
-          } catch(err) {
-            console.error('[ScalpMaster Bridge] Failed to create OrderLine:', err);
-            activeOrderLine = null;
-          }
-        });
-
-        // Remove Stop Loss Line
-        window.addEventListener('FSM_CHART_REMOVE_SL', () => {
-          if (activeOrderLine) {
-            try {
-              activeOrderLine.remove();
-            } catch(e) {}
-            activeOrderLine = null;
+            console.warn('[ScalpMaster Bridge] Execution marker error:', err);
           }
         });
 
         // Clear all markers
         window.addEventListener('FSM_CHART_CLEAR_ALL', () => {
+          currentActiveSl = null;
           if (activeOrderLine) {
             try { activeOrderLine.remove(); } catch(e) {}
             activeOrderLine = null;
@@ -201,6 +249,29 @@
           });
           createdShapes = [];
         });
+
+        // Listen for Symbol / Timeframe change to automatically restore SL
+        async function hookChartEvents() {
+          const chart = await waitForChart(20000);
+          if (!chart) return;
+          try {
+            if (chart.onSymbolChanged && typeof chart.onSymbolChanged().subscribe === 'function') {
+              chart.onSymbolChanged().subscribe(null, () => {
+                if (currentActiveSl) {
+                  setTimeout(() => renderOrderLine(currentActiveSl.price, currentActiveSl.qty), 600);
+                }
+              });
+            }
+            if (chart.onIntervalChanged && typeof chart.onIntervalChanged().subscribe === 'function') {
+              chart.onIntervalChanged().subscribe(null, () => {
+                if (currentActiveSl) {
+                  setTimeout(() => renderOrderLine(currentActiveSl.price, currentActiveSl.qty), 600);
+                }
+              });
+            }
+          } catch(err) {}
+        }
+        hookChartEvents();
       })();
     `;
     (document.head || document.documentElement).appendChild(script);
@@ -395,6 +466,7 @@
           const saved = res[STATE_KEY];
           state.dayStats = saved.dayStats || state.dayStats;
           state.completedTrades = saved.completedTrades || [];
+          state.chartMarkers = saved.chartMarkers || [];
           state.activePosition = saved.activePosition || null;
           state.lots = saved.lots || 1;
           state.hudVisible = saved.hudVisible !== undefined ? saved.hudVisible : true;
@@ -406,22 +478,81 @@
           if (state.activePosition && state.activePosition.stopLoss) {
             restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty);
           }
+          // Restore past execution markers on chart
+          if (state.chartMarkers && state.chartMarkers.length > 0) {
+            restoreChartMarkers();
+          }
         }
         renderHUD();
       });
     } else {
+      try {
+        const raw = localStorage.getItem(STATE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          state.dayStats = saved.dayStats || state.dayStats;
+          state.completedTrades = saved.completedTrades || [];
+          state.chartMarkers = saved.chartMarkers || [];
+          state.activePosition = saved.activePosition || null;
+          state.lots = saved.lots || 1;
+          state.hudVisible = saved.hudVisible !== undefined ? saved.hudVisible : true;
+          state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
+          state.minimized = !!saved.minimized;
+          state.mode = saved.mode || 'PRACTICE';
+
+          if (state.activePosition && state.activePosition.stopLoss) {
+            restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty);
+          }
+          if (state.chartMarkers && state.chartMarkers.length > 0) {
+            restoreChartMarkers();
+          }
+        }
+      } catch(e) {}
       renderHUD();
     }
   }
 
-  // Helper to restore SL on initial load with retry until TradingView is ready
+  // Helper to restore SL on initial load with repeated retries until TradingView is ready
   function restoreChartStopLoss(price, qty, attempts = 0) {
     if (attempts > 15) return;
+    window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
+      detail: { price: price, qty: qty }
+    }));
+    if (attempts < 5) {
+      setTimeout(() => {
+        if (state.activePosition && state.activePosition.stopLoss) {
+          restoreChartStopLoss(price, qty, attempts + 1);
+        }
+      }, 1200 + attempts * 800);
+    }
+  }
+
+  // Restore Execution Markers on Chart
+  function restoreChartMarkers(attempts = 0) {
+    if (!state.chartMarkers || state.chartMarkers.length === 0 || attempts > 10) return;
     setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
-        detail: { price: price, qty: qty }
-      }));
-    }, 1000 + attempts * 500);
+      state.chartMarkers.forEach(m => {
+        window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', { detail: m }));
+      });
+    }, 1500 + attempts * 1000);
+  }
+
+  // Record and Place Marker (Persisted)
+  function recordAndPlaceExecutionMarker(side, price, text, qty) {
+    state.chartMarkers = state.chartMarkers || [];
+    const marker = {
+      side: side,
+      price: parseFloat(price.toFixed(2)),
+      text: text,
+      qty: qty,
+      time: Math.floor(Date.now() / 1000)
+    };
+    state.chartMarkers.push(marker);
+    if (state.chartMarkers.length > 50) {
+      state.chartMarkers.shift();
+    }
+    window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', { detail: marker }));
+    saveState();
   }
 
   // Save State
@@ -429,6 +560,9 @@
     if (chrome && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ [STATE_KEY]: state });
     }
+    try {
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    } catch(e) {}
   }
 
   // Fast title parser
@@ -547,56 +681,130 @@
   // -------------------------------------------------------------
   // 3. REAL-TIME SCRAPING & AUTO STOP LOSS CHECK LOOP
   // -------------------------------------------------------------
-  function scrapeActiveMarketData() {
-    let detectedPrice = null;
-    let detectedSymbol = null;
+  let lastSlEnsureTime = 0;
 
-    // 1. From document.title
-    const titleData = quickScrapeTitle();
-    if (titleData.price !== null) {
-      detectedPrice = titleData.price;
-      detectedSymbol = titleData.symbol;
+  function ensureSlOnChartPeriodic() {
+    if (!state.activePosition || !state.activePosition.stopLoss) return;
+    const now = Date.now();
+    if (now - lastSlEnsureTime > 2500) {
+      lastSlEnsureTime = now;
+      window.dispatchEvent(new CustomEvent('FSM_CHART_ENSURE_SL', {
+        detail: {
+          price: state.activePosition.stopLoss,
+          qty: state.activePosition.qty
+        }
+      }));
     }
+  }
 
-    // 2. From TradingView Iframe fallback
-    if (detectedPrice === null || !detectedSymbol) {
-      const tvDoc = getTvIframeDocument();
-      if (tvDoc) {
-        const activeChart = tvDoc.querySelector('.chart-container.active') || tvDoc.querySelector('.chart-container');
-        if (activeChart) {
-          if (!detectedSymbol) {
-            const symBtn = activeChart.querySelector('.js-button-text') || activeChart.querySelector('button[class*="title-"]');
-            if (symBtn && symBtn.innerText && symBtn.innerText.trim()) {
-              detectedSymbol = symBtn.innerText.trim();
+  function updateChartMismatchWarning(show, chartSymbol, lockedSymbol) {
+    let warnEl = document.getElementById('fsm-chart-mismatch-warn');
+    if (show) {
+      if (!warnEl) {
+        warnEl = document.createElement('div');
+        warnEl.id = 'fsm-chart-mismatch-warn';
+        warnEl.className = 'fsm-chart-warning';
+        const header = document.querySelector('.fsm-header');
+        if (header && header.parentNode) {
+          header.insertAdjacentElement('afterend', warnEl);
+        }
+      }
+      warnEl.innerHTML = `⚠️ Chart: <b>${chartSymbol}</b> | Trade Locked: <b>${lockedSymbol}</b>`;
+      warnEl.style.display = 'flex';
+    } else if (warnEl) {
+      warnEl.style.display = 'none';
+    }
+  }
+
+  function hideChartMismatchWarning() {
+    const warnEl = document.getElementById('fsm-chart-mismatch-warn');
+    if (warnEl) warnEl.style.display = 'none';
+  }
+
+  function scrapeActiveMarketData() {
+    try {
+      let detectedPrice = null;
+      let detectedSymbol = null;
+
+      // 1. From document.title (fastest, zero-DOM overhead)
+      const titleData = quickScrapeTitle();
+      if (titleData.price !== null) {
+        detectedPrice = titleData.price;
+        detectedSymbol = titleData.symbol;
+      }
+
+      // 2. From TradingView Iframe fallback
+      if (detectedPrice === null || !detectedSymbol) {
+        const tvDoc = getTvIframeDocument();
+        if (tvDoc) {
+          const activeChart = tvDoc.querySelector('.chart-container.active') || tvDoc.querySelector('.chart-container');
+          if (activeChart) {
+            if (!detectedSymbol) {
+              const symBtn = activeChart.querySelector('.js-button-text') || activeChart.querySelector('button[class*="title-"]');
+              if (symBtn && symBtn.innerText && symBtn.innerText.trim()) {
+                detectedSymbol = symBtn.innerText.trim();
+              }
             }
-          }
-          if (detectedPrice === null) {
-            const buyBtnPrice = activeChart.querySelector('[data-name="buy-order-button"] .buttonText-hw_3o_pb');
-            if (buyBtnPrice && buyBtnPrice.innerText) {
-              const bp = parseFloat(buyBtnPrice.innerText.replace(/,/g, '').trim());
-              if (!isNaN(bp) && bp > 0) detectedPrice = bp;
+            if (detectedPrice === null) {
+              const buyBtnPrice = activeChart.querySelector('[data-name="buy-order-button"] .buttonText-hw_3o_pb') ||
+                                  activeChart.querySelector('[data-name="buy-order-button"] [class*="buttonText"]');
+              if (buyBtnPrice && buyBtnPrice.innerText) {
+                const bp = parseFloat(buyBtnPrice.innerText.replace(/,/g, '').trim());
+                if (!isNaN(bp) && bp > 0) detectedPrice = bp;
+              }
             }
           }
         }
       }
+
+      // -----------------------------------------------------------
+      // REQUIREMENT 5: STRICT SYMBOL LOCK DURING ACTIVE TRADE
+      // -----------------------------------------------------------
+      const isTradeActive = !!(state.activePosition && state.activePosition.symbol);
+
+      if (isTradeActive) {
+        const lockedSymbol = state.activePosition.symbol;
+        if (state.symbol !== lockedSymbol) {
+          state.symbol = lockedSymbol;
+          const symEl = document.querySelector('.fsm-symbol-name');
+          if (symEl) symEl.textContent = lockedSymbol;
+        }
+
+        // Only accept price tick IF current chart matches active symbol
+        const matchesActive = (!detectedSymbol || detectedSymbol === lockedSymbol);
+        if (matchesActive && detectedPrice !== null && !isNaN(detectedPrice) && detectedPrice > 0) {
+          state.prevLtp = state.ltp || detectedPrice;
+          state.ltp = detectedPrice;
+          state.activePosition.lastKnownLtp = detectedPrice;
+          renderLtpTick();
+        }
+
+        // Show warning if user changed chart symbol
+        const isOffChart = !!(detectedSymbol && detectedSymbol !== lockedSymbol);
+        updateChartMismatchWarning(isOffChart, detectedSymbol, lockedSymbol);
+      } else {
+        // Flat (No active trade): freely adopt whichever chart instrument is focused
+        hideChartMismatchWarning();
+        if (detectedSymbol && detectedSymbol !== state.symbol) {
+          handleSymbolUpdate(detectedSymbol);
+        }
+        if (detectedPrice !== null && !isNaN(detectedPrice) && detectedPrice > 0) {
+          state.prevLtp = state.ltp || detectedPrice;
+          state.ltp = detectedPrice;
+          renderLtpTick();
+        }
+      }
+
+      // Check Stop Loss auto-trigger
+      checkStopLossTrigger();
+      updatePnLDisplay();
+
+      // Ensure Stop Loss is actively rendered on chart
+      ensureSlOnChartPeriodic();
+    } catch (err) {
+      // Catch all to ensure scrape loop never terminates
+      console.warn('[ScalpMaster Scraper]', err);
     }
-
-    // Apply symbol if changed
-    if (detectedSymbol && detectedSymbol !== state.symbol) {
-      handleSymbolUpdate(detectedSymbol);
-    }
-
-    // Apply price ONLY IF valid and non-zero
-    if (detectedPrice !== null && !isNaN(detectedPrice) && detectedPrice > 0) {
-      state.prevLtp = state.ltp || detectedPrice;
-      state.ltp = detectedPrice;
-      renderLtpTick();
-    }
-
-    // Check Stop Loss auto-trigger
-    checkStopLossTrigger();
-
-    updatePnLDisplay();
   }
 
   // Check Stop Loss Trigger
@@ -629,15 +837,13 @@
     const pos = state.activePosition;
     showToast(`🛑 STOP LOSS HIT @ ₹${triggerPrice.toFixed(2)}! Auto-Closing...`);
 
-    // Place exit marker on chart
-    window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', {
-      detail: {
-        side: pos.side === 'BUY' ? 'sell' : 'buy',
-        price: triggerPrice,
-        text: `SL HIT @ ₹${triggerPrice.toFixed(2)}`,
-        qty: pos.qty
-      }
-    }));
+    // Place exit marker on chart (recorded and persisted)
+    recordAndPlaceExecutionMarker(
+      pos.side === 'BUY' ? 'sell' : 'buy',
+      triggerPrice,
+      `SL HIT @ ₹${triggerPrice.toFixed(2)}`,
+      pos.qty
+    );
 
     // Remove SL Line from chart
     window.dispatchEvent(new CustomEvent('FSM_CHART_REMOVE_SL'));
@@ -818,14 +1024,12 @@
       };
 
       // Place execution marker on chart
-      window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', {
-        detail: {
-          side: side,
-          price: currentPrice,
-          text: `${side} ${qty} @ ₹${currentPrice.toFixed(2)}`,
-          qty: qty
-        }
-      }));
+      recordAndPlaceExecutionMarker(
+        side,
+        currentPrice,
+        `${side} ${qty} @ ₹${currentPrice.toFixed(2)}`,
+        qty
+      );
 
       playSound(side);
       showToast(`${side} ${qty} ${state.symbol} @ ₹${currentPrice.toFixed(2)} (Trade #${state.dayStats.totalTrades})`);
@@ -846,14 +1050,12 @@
       state.activePosition.qty = totalQty;
       state.activePosition.entryPrice = parseFloat(avgPrice.toFixed(2));
 
-      window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', {
-        detail: {
-          side: side,
-          price: currentPrice,
-          text: `ADD ${qty} @ ₹${currentPrice.toFixed(2)}`,
-          qty: qty
-        }
-      }));
+      recordAndPlaceExecutionMarker(
+        side,
+        currentPrice,
+        `ADD ${qty} @ ₹${currentPrice.toFixed(2)}`,
+        qty
+      );
 
       if (state.activePosition.stopLoss) {
         window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
@@ -871,14 +1073,12 @@
     const openQty = state.activePosition.qty;
     const closeQty = Math.min(openQty, qty);
 
-    window.dispatchEvent(new CustomEvent('FSM_CHART_PLACE_MARKER', {
-      detail: {
-        side: side,
-        price: currentPrice,
-        text: `CLOSE ${closeQty} @ ₹${currentPrice.toFixed(2)}`,
-        qty: closeQty
-      }
-    }));
+    recordAndPlaceExecutionMarker(
+      side,
+      currentPrice,
+      `CLOSE ${closeQty} @ ₹${currentPrice.toFixed(2)}`,
+      closeQty
+    );
 
     if (closeQty >= openQty) {
       // Full close -> Position becomes FLAT
@@ -1009,6 +1209,34 @@
     updateSlDisplay();
   }
 
+  // Set Stop Loss by Explicit Price (Manual Input)
+  function setStopLossExplicitPrice(price) {
+    if (!state.activePosition) return;
+    const entryPrice = state.activePosition.entryPrice;
+    price = parseFloat(price);
+    if (isNaN(price) || price <= 0) return;
+    price = parseFloat(price.toFixed(2));
+
+    let pts = 0;
+    if (state.activePosition.side === 'BUY') {
+      pts = Math.max(0, entryPrice - price);
+    } else {
+      pts = Math.max(0, price - entryPrice);
+    }
+
+    state.activePosition.stopLoss = price;
+    state.activePosition.slPoints = parseFloat(pts.toFixed(2));
+
+    // Dispatch fresh event to TradingView Chart Bridge
+    window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
+      detail: { price: price, qty: state.activePosition.qty }
+    }));
+
+    showToast(`Stop Loss placed at ₹${price.toFixed(2)} (${pts > 0 ? pts.toFixed(1) + ' pts' : 'Manual'})`);
+    saveState();
+    updateSlDisplay();
+  }
+
   // Clear Stop Loss
   function clearStopLoss() {
     if (!state.activePosition) return;
@@ -1025,6 +1253,7 @@
     if (confirm("Reset today's practice statistics and completed trade log?")) {
       state.activePosition = null;
       state.completedTrades = [];
+      state.chartMarkers = [];
       state.dayStats = {
         grossPnL: 0,
         totalCharges: 0,
@@ -1213,12 +1442,21 @@
                     ${state.activePosition.stopLoss ? '<button class="fsm-sl-clear" id="fsm-sl-clear-btn" title="Remove SL">✕</button>' : ''}
                   </div>
                 </div>
+                <!-- Quick Points Buttons -->
                 <div class="fsm-sl-controls">
                   <button class="fsm-sl-btn ${state.activePosition.slPoints === 5 ? 'active' : ''}" data-pts="5">5 pts</button>
                   <button class="fsm-sl-btn ${state.activePosition.slPoints === 10 ? 'active' : ''}" data-pts="10">10 pts</button>
                   <button class="fsm-sl-btn ${state.activePosition.slPoints === 15 ? 'active' : ''}" data-pts="15">15 pts</button>
                   <button class="fsm-sl-btn ${state.activePosition.slPoints === 20 ? 'active' : ''}" data-pts="20">20 pts</button>
-                  <span style="font-size: 8px; color: var(--fsm-text-muted); margin-left: auto;">(Draggable on chart)</span>
+                  <span style="font-size: 8px; color: var(--fsm-text-muted); margin-left: auto;">(Draggable)</span>
+                </div>
+                <!-- Manual SL Input Option -->
+                <div class="fsm-sl-manual-row">
+                  <div class="fsm-sl-manual-input-wrap">
+                    <span class="fsm-sl-manual-curr">₹</span>
+                    <input type="number" step="0.05" id="fsm-sl-manual-input" class="fsm-sl-input" placeholder="Manual SL Price..." value="${state.activePosition.stopLoss ? state.activePosition.stopLoss.toFixed(2) : ''}" />
+                  </div>
+                  <button id="fsm-sl-manual-set-btn" class="fsm-btn-manual-sl">SET SL</button>
                 </div>
               </div>
             </div>
@@ -1360,19 +1598,48 @@
         if (state.activePosition) {
           state.dayStats.totalTrades += 1;
           const currentPrice = state.ltp > 0 ? state.ltp : state.activePosition.entryPrice;
+          const oppSide = state.activePosition.side === 'BUY' ? 'sell' : 'buy';
+          recordAndPlaceExecutionMarker(
+            oppSide,
+            currentPrice,
+            `EXIT ${state.activePosition.qty} @ ₹${currentPrice.toFixed(2)}`,
+            state.activePosition.qty
+          );
           closeActivePositionInternal(state.activePosition.qty, currentPrice, 'MANUAL EXIT');
           showToast(`Squared off all open quantity (Trade #${state.dayStats.totalTrades})`);
         }
       };
     }
 
-    // Stop Loss Buttons
+    // Stop Loss Quick Buttons
     container.querySelectorAll('.fsm-sl-btn').forEach(btn => {
       btn.onclick = () => {
         const pts = parseFloat(btn.dataset.pts);
         setStopLossByPoints(pts);
       };
     });
+
+    // Manual SL Setter
+    const manualSlBtn = container.querySelector('#fsm-sl-manual-set-btn');
+    const manualSlInput = container.querySelector('#fsm-sl-manual-input');
+    const handleManualSl = () => {
+      if (!manualSlInput || !state.activePosition) return;
+      const val = parseFloat(manualSlInput.value);
+      if (isNaN(val) || val <= 0) {
+        showToast('Please enter a valid price for Stop Loss');
+        return;
+      }
+      setStopLossExplicitPrice(val);
+    };
+    if (manualSlBtn) manualSlBtn.onclick = (e) => { e.preventDefault(); handleManualSl(); };
+    if (manualSlInput) {
+      manualSlInput.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleManualSl();
+        }
+      };
+    }
 
     const clearSlBtn = container.querySelector('#fsm-sl-clear-btn');
     if (clearSlBtn) {
@@ -1455,6 +1722,7 @@
       } else if (req.action === 'RESET_STATE') {
         state.activePosition = null;
         state.completedTrades = [];
+        state.chartMarkers = [];
         state.dayStats = {
           grossPnL: 0,
           totalCharges: 0,
@@ -1475,8 +1743,41 @@
     });
   }
 
+  // -------------------------------------------------------------
+  // TAB SWITCH & FOCUS RE-ACTIVATION (Prevent Stuck / Delayed LTP)
+  // -------------------------------------------------------------
+  function restartActiveLoop() {
+    if (window.__fsm_interval) {
+      clearInterval(window.__fsm_interval);
+      window.__fsm_interval = null;
+    }
+    scrapeActiveMarketData();
+    window.__fsm_interval = setInterval(scrapeActiveMarketData, 100);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      restartActiveLoop();
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    restartActiveLoop();
+  });
+
+  // Watch for real-time title changes directly (instant, zero-latency trigger)
+  try {
+    const titleEl = document.querySelector('title');
+    if (titleEl) {
+      const titleObserver = new MutationObserver(() => {
+        scrapeActiveMarketData();
+      });
+      titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true });
+    }
+  } catch(e) {}
+
   // Start single loop
-  window.__fsm_interval = setInterval(scrapeActiveMarketData, 100);
+  restartActiveLoop();
 
   // Initialize
   loadState();

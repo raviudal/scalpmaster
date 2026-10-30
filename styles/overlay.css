@@ -565,6 +565,101 @@
   color: #f87171;
 }
 
+/* Manual SL Row */
+.fsm-sl-manual-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(239, 68, 68, 0.25);
+}
+
+.fsm-sl-manual-input-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 4px;
+  padding: 2px 5px;
+  transition: all 0.15s ease;
+}
+
+.fsm-sl-manual-input-wrap:focus-within {
+  border-color: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+}
+
+.fsm-sl-manual-curr {
+  font-size: 10px;
+  color: #ef4444;
+  font-weight: 700;
+  margin-right: 3px;
+}
+
+.fsm-sl-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: 700;
+  padding: 2px 0;
+}
+
+.fsm-sl-input::placeholder {
+  color: #64748b;
+  font-size: 9px;
+  font-family: sans-serif;
+  font-weight: 400;
+}
+
+.fsm-btn-manual-sl {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  border: 1px solid #ef4444;
+  color: #fff;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 9.5px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+  transition: all 0.15s ease;
+}
+
+.fsm-btn-manual-sl:hover {
+  background: #dc2626;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.45);
+}
+
+/* Off-Chart Mismatch Warning Banner */
+.fsm-chart-warning {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  color: #fbbf24;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin: 4px 0 2px 0;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  line-height: 1.2;
+}
+
+.fsm-symbol-lock {
+  font-size: 10px;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
 .fsm-no-pos {
   text-align: center;
   color: var(--fsm-text-muted);
