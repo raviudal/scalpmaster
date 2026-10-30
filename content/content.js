@@ -625,6 +625,8 @@
           state.chartMarkers = saved.chartMarkers || [];
           state.activePosition = saved.activePosition || null;
           state.lots = saved.lots || 1;
+          state.lotSize = saved.lotSize && saved.lotSize > 1 ? saved.lotSize : state.lotSize;
+          state.qty = (state.lots || 1) * (state.lotSize || 1);
           state.hudVisible = saved.hudVisible !== undefined ? saved.hudVisible : true;
           state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
           state.minimized = !!saved.minimized;
@@ -662,6 +664,8 @@
           state.chartMarkers = saved.chartMarkers || [];
           state.activePosition = saved.activePosition || null;
           state.lots = saved.lots || 1;
+          state.lotSize = saved.lotSize && saved.lotSize > 1 ? saved.lotSize : state.lotSize;
+          state.qty = (state.lots || 1) * (state.lotSize || 1);
           state.hudVisible = saved.hudVisible !== undefined ? saved.hudVisible : true;
           state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
           state.minimized = !!saved.minimized;
@@ -770,7 +774,7 @@
     return null;
   }
 
-  // Query FYERS Local IndexedDB
+  // Query FYERS Local IndexedDB for accurate master contract & lot size
   function querySymbolIndexedDB(symbolKey) {
     return new Promise((resolve) => {
       try {
@@ -782,21 +786,35 @@
           }
           const tx = db.transaction('symbols', 'readonly');
           const store = tx.objectStore('symbols');
+
+          // Clean raw symbol
+          const raw = (symbolKey || '').trim();
+          const cleanNoEx = raw.replace(/^(NSE:|BSE:|MCX:)/i, '');
+
           const keysToTry = [
-            symbolKey,
-            'NSE:' + symbolKey,
-            'BSE:' + symbolKey,
-            'MCX:' + symbolKey
+            'NSE:' + cleanNoEx,
+            cleanNoEx,
+            'BSE:' + cleanNoEx,
+            'MCX:' + cleanNoEx,
+            raw
           ];
+
           function tryLookup(idx) {
             if (idx >= keysToTry.length) return resolve(null);
             const getReq = store.get(keysToTry[idx]);
             getReq.onsuccess = () => {
-              if (getReq.result && getReq.result.lot_size) {
-                resolve(getReq.result);
-              } else {
-                tryLookup(idx + 1);
+              const res = getReq.result;
+              if (res) {
+                const ls = res.lot_size || res.min_lot_size || res.min_lot || res.lotsize;
+                if (ls && Number(ls) > 0) {
+                  return resolve({
+                    ...res,
+                    lot_size: Number(ls),
+                    description: res.description || res.short_name || res.name || ''
+                  });
+                }
               }
+              tryLookup(idx + 1);
             };
             getReq.onerror = () => tryLookup(idx + 1);
           }
@@ -809,37 +827,42 @@
     });
   }
 
-  // Fallback Lot Sizes
+  // Fallback Lot Sizes (Regulatory standard exchange lot sizes)
   function inferLotSize(symbol) {
-    const s = symbol.toUpperCase();
+    const s = (symbol || '').toUpperCase();
     if (s.includes('BANKNIFTY')) return 15;
     if (s.includes('FINNIFTY')) return 25;
     if (s.includes('MIDCPNIFTY')) return 50;
-    if (s.includes('NIFTY') && (s.includes('PE') || s.includes('CE') || s.includes('FUT'))) return 65;
+    if (s.includes('NIFTY') && (s.includes('PE') || s.includes('CE') || s.includes('FUT') || s.includes('26') || s.includes('25') || s.includes('24'))) return 65;
     if (s.includes('SENSEX')) return 10;
     if (s.includes('BANKEX')) return 15;
     if (s.includes('CRUDEOIL')) return 100;
     if (s.includes('NATURALGAS')) return 1250;
+    if (s.includes('GOLDM')) return 10;
+    if (s.includes('SILVERM')) return 5;
     return 1;
   }
 
   // Symbol Update Handler
   let lastCheckedSymbol = '';
-  async function handleSymbolUpdate(newSymbol) {
-    if (!newSymbol || newSymbol === lastCheckedSymbol) return;
+  async function handleSymbolUpdate(newSymbol, force = false) {
+    if (!newSymbol) return;
+    if (!force && newSymbol === lastCheckedSymbol && state.lotSize > 1) return;
     lastCheckedSymbol = newSymbol;
     state.symbol = newSymbol;
 
     const dbRecord = await querySymbolIndexedDB(newSymbol);
     if (dbRecord && dbRecord.lot_size) {
-      state.lotSize = dbRecord.lot_size;
+      state.lotSize = Number(dbRecord.lot_size);
       state.symbolDesc = dbRecord.description || dbRecord.short_name || '';
+      console.log(`[ScalpMaster] Retrieved lot size from IndexedDB for ${newSymbol}: ${state.lotSize}`);
     } else {
       state.lotSize = inferLotSize(newSymbol);
-      state.symbolDesc = newSymbol.includes('PE') ? 'Put Option' : newSymbol.includes('CE') ? 'Call Option' : 'Instrument';
+      state.symbolDesc = newSymbol.includes('PE') ? 'Put Option' : newSymbol.includes('CE') ? 'Call Option' : (newSymbol.includes('FUT') ? 'Futures' : 'Chart Instrument');
+      console.log(`[ScalpMaster] Inferred lot size for ${newSymbol}: ${state.lotSize}`);
     }
 
-    state.qty = state.lots * state.lotSize;
+    state.qty = (state.lots || 1) * (state.lotSize || 1);
 
     // Update DOM
     const symEl = document.querySelector('.fsm-symbol-name');
@@ -1525,6 +1548,7 @@
           </span>
         </div>
         <div class="fsm-controls">
+          <button class="fsm-icon-btn" id="fsm-refresh-btn" title="Refresh Instrument, Lot Size & LTP">🔄</button>
           <button class="fsm-icon-btn" id="fsm-sound-btn" title="Toggle Sound">${state.soundEnabled ? '🔔' : '🔕'}</button>
           <button class="fsm-icon-btn" id="fsm-min-btn" title="Minimize / Expand">${state.minimized ? '🗖' : '🗕'}</button>
         </div>
@@ -1734,6 +1758,26 @@
         showToast(`Mode: ${state.mode === 'PRACTICE' ? 'Practice (Simulated)' : 'Live DOM Execution'}`);
         saveState();
         renderHUD();
+      };
+    }
+
+    const refreshBtn = container.querySelector('#fsm-refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.onclick = async () => {
+        refreshBtn.style.transform = 'rotate(360deg)';
+        refreshBtn.style.transition = 'transform 0.4s ease';
+        setTimeout(() => { refreshBtn.style.transform = ''; refreshBtn.style.transition = ''; }, 400);
+
+        // Force reload active instrument and master contract details
+        lastCheckedSymbol = '';
+        const titleData = quickScrapeTitle();
+        const detectedSym = titleData.symbol || state.symbol;
+        if (detectedSym) {
+          await handleSymbolUpdate(detectedSym, true);
+        }
+        scrapeActiveMarketData();
+        renderHUD();
+        showToast(`Refreshed: ${state.symbol} (Lot: ${state.lotSize}, LTP: ₹${state.ltp.toFixed(2)})`);
       };
     }
 
