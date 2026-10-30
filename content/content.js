@@ -843,6 +843,16 @@
     return 1;
   }
 
+  // Helper to normalize symbol strings for robust comparison
+  function normalizeSymbolName(s) {
+    if (!s) return '';
+    return String(s)
+      .trim()
+      .toUpperCase()
+      .replace(/^(NSE:|BSE:|MCX:)/i, '')
+      .replace(/[-\s_]/g, '');
+  }
+
   // Symbol Update Handler
   let lastCheckedSymbol = '';
   async function handleSymbolUpdate(newSymbol, force = false) {
@@ -970,8 +980,11 @@
           if (symEl) symEl.textContent = lockedSymbol;
         }
 
-        // Only accept price tick IF current chart matches active symbol
-        const matchesActive = (!detectedSymbol || detectedSymbol === lockedSymbol);
+        // Compare using normalized names (e.g. "NSE:NIFTY26N0322900CE" vs "NIFTY26N0322900CE")
+        const normDetected = normalizeSymbolName(detectedSymbol);
+        const normLocked = normalizeSymbolName(lockedSymbol);
+        const matchesActive = (!detectedSymbol || normDetected === normLocked);
+
         if (matchesActive && detectedPrice !== null && !isNaN(detectedPrice) && detectedPrice > 0) {
           state.prevLtp = state.ltp || detectedPrice;
           state.ltp = detectedPrice;
@@ -979,13 +992,13 @@
           renderLtpTick();
         }
 
-        // Show warning if user changed chart symbol
-        const isOffChart = !!(detectedSymbol && detectedSymbol !== lockedSymbol);
+        // Show warning ONLY IF the user truly switched to another instrument
+        const isOffChart = !!(detectedSymbol && normDetected !== normLocked);
         updateChartMismatchWarning(isOffChart, detectedSymbol, lockedSymbol);
       } else {
         // Flat (No active trade): freely adopt whichever chart instrument is focused
         hideChartMismatchWarning();
-        if (detectedSymbol && detectedSymbol !== state.symbol) {
+        if (detectedSymbol && normalizeSymbolName(detectedSymbol) !== normalizeSymbolName(state.symbol)) {
           handleSymbolUpdate(detectedSymbol);
         }
         if (detectedPrice !== null && !isNaN(detectedPrice) && detectedPrice > 0) {
@@ -1197,7 +1210,7 @@
   function handleTradeButtonClick(side) {
     initAudio();
 
-    if (state.activePosition && state.activePosition.symbol && state.symbol !== state.activePosition.symbol) {
+    if (state.activePosition && state.activePosition.symbol && normalizeSymbolName(state.symbol) !== normalizeSymbolName(state.activePosition.symbol)) {
       showToast(`⚠️ Trade locked on ${state.activePosition.symbol}! Square it off first.`);
       playSound('LOSS');
       return;
@@ -1536,7 +1549,7 @@
     const liveNetDayPnL = liveGrossDayPnL - liveTotalCharges;
     const daySign = liveNetDayPnL >= 0 ? '+' : '';
 
-    const isLockedToOther = state.activePosition && state.activePosition.symbol && state.symbol !== state.activePosition.symbol;
+    const isLockedToOther = state.activePosition && state.activePosition.symbol && normalizeSymbolName(state.symbol) !== normalizeSymbolName(state.activePosition.symbol);
 
     container.innerHTML = `
       <!-- Header -->
