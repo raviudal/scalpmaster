@@ -58,7 +58,7 @@
   }
 
   // -------------------------------------------------------------
-  // 1. INJECT TRADINGVIEW CHART BRIDGE (Main World Execution)
+  // 1. INJECT TRADINGVIEW CHART & NATIVE BROKER BRIDGE (Main World)
   // -------------------------------------------------------------
   function injectChartBridge() {
     const existingScript = document.getElementById('fsm-chart-bridge-script');
@@ -70,145 +70,260 @@
       (function() {
         let activeOrderLine = null;
         let createdShapes = [];
-        let currentActiveSl = null; // { price, qty }
+        let currentActiveSl = null; // { symbol, price, qty }
+        let currentActivePos = null; // { symbol, side, qty, avgPrice }
+        let isBrokerHooked = false;
 
-        // Polling helper that waits up to timeoutMs for TradingView chart to be interactive
-        function waitForChart(timeoutMs = 20000) {
+        // Normalize symbol to TradingView exchange format (e.g., "NSE:NIFTY26N0322950PE")
+        function formatTvSymbol(symbol) {
+          if (!symbol) return '';
+          let s = symbol.trim();
+          if (!s.includes(':')) {
+            s = (s.includes('MCX') ? 'MCX:' : (s.includes('BSE') ? 'BSE:' : 'NSE:')) + s;
+          }
+          return s;
+        }
+
+        // Wait for FYERS native broker or TradingView Chart to be ready
+        function waitForBrokerOrChart(timeoutMs = 25000) {
           return new Promise((resolve) => {
             const start = Date.now();
             const check = () => {
-              try {
-                if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
+              // 1. Check native TradingView broker host (FYERS native mechanism)
+              if (window.broker && window.broker._host && typeof window.broker._host.orderUpdate === 'function') {
+                hookBrokerMethods();
+                return resolve({ type: 'broker', broker: window.broker, host: window.broker._host });
+              }
+              // 2. Check TradingView widget
+              if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
+                try {
                   const c = window.tvWidget.activeChart();
                   if (c && typeof c.createOrderLine === 'function') {
-                    return resolve(c);
+                    return resolve({ type: 'chart', chart: c });
                   }
-                }
-              } catch(e) {}
+                } catch(e) {}
+              }
               if (Date.now() - start > timeoutMs) {
                 return resolve(null);
               }
-              setTimeout(check, 250);
+              setTimeout(check, 300);
             };
             check();
           });
         }
 
-        // Render / Re-render Order Line cleanly on the active TradingView chart
-        async function renderOrderLine(price, qty) {
-          if (!price || price <= 0) return;
-          const chart = await waitForChart(15000);
-          if (!chart) {
-            console.warn('[ScalpMaster Bridge] Chart not ready for SL line');
-            return;
-          }
+        // Hook FYERS native broker methods so drag & cancel on chart sync back to ScalpMaster
+        function hookBrokerMethods() {
+          if (isBrokerHooked || !window.broker) return;
+          isBrokerHooked = true;
 
-          try {
-            // Enable TradingView trading order lines & extend-left properties
-            try {
-              const model = chart._model || (chart._chartWidget && chart._chartWidget._model);
-              if (model && model._properties && model._properties.tradingProperties) {
-                model._properties.tradingProperties.showOrders.setValue(true);
-                model._properties.tradingProperties.extendLeft.setValue(true);
+          const origModifyOrder = window.broker.modifyOrder;
+          window.broker.modifyOrder = function(order) {
+            if (order && order.id && String(order.id).startsWith('FSM_SL_')) {
+              const newPrice = order.stopPrice || order.price || order.limitPrice;
+              if (newPrice && newPrice > 0) {
+                window.dispatchEvent(new CustomEvent('FSM_SL_DRAGGED', { detail: { price: newPrice } }));
               }
-            } catch(err) {}
+              return Promise.resolve({ success: true });
+            }
+            if (typeof origModifyOrder === 'function') {
+              return origModifyOrder.apply(this, arguments);
+            }
+            return Promise.resolve();
+          };
 
-            // Remove any existing active order line safely to prevent duplicates
-            if (activeOrderLine) {
+          const origCancelOrder = window.broker.cancelOrder;
+          window.broker.cancelOrder = function(orderId) {
+            if (orderId && String(orderId).startsWith('FSM_SL_')) {
+              window.dispatchEvent(new CustomEvent('FSM_SL_CANCELLED'));
+              return Promise.resolve({ success: true });
+            }
+            if (typeof origCancelOrder === 'function') {
+              return origCancelOrder.apply(this, arguments);
+            }
+            return Promise.resolve();
+          };
+
+          const origClosePosition = window.broker.closePosition;
+          window.broker.closePosition = function(positionId) {
+            if (positionId && String(positionId).startsWith('FSM_POS_')) {
+              window.dispatchEvent(new CustomEvent('FSM_POS_CLOSE_CLICKED'));
+              return Promise.resolve({ success: true });
+            }
+            if (typeof origClosePosition === 'function') {
+              return origClosePosition.apply(this, arguments);
+            }
+            return Promise.resolve();
+          };
+        }
+
+        // -------------------------------------------------------------
+        // NATIVE BROKER POSITION UPDATE
+        // -------------------------------------------------------------
+        async function updateNativePosition(pos) {
+          const res = await waitForBrokerOrChart(15000);
+          if (!res) return;
+
+          if (res.type === 'broker') {
+            const host = res.host;
+            const tvSym = formatTvSymbol(pos ? pos.symbol : (currentActivePos ? currentActivePos.symbol : ''));
+            const posId = 'FSM_POS_' + (pos ? pos.symbol : 'MAIN');
+
+            if (!pos || !pos.qty || pos.qty <= 0) {
+              // Close position
               try {
-                activeOrderLine.remove();
-              } catch(err) {}
-              activeOrderLine = null;
+                host.positionUpdate({
+                  id: posId,
+                  symbol: tvSym,
+                  qty: 0,
+                  side: 1,
+                  avgPrice: 0
+                });
+              } catch(e) {}
+              currentActivePos = null;
+              return;
             }
 
-            const order = await chart.createOrderLine();
-            order.setPrice(price)
-              .setText('🛑 STOP LOSS: ₹' + price.toFixed(2))
-              .setQuantity(String(qty || ''))
-              .setExtendLeft(true) // Full width across candles
-              .setLineWidth(2)
-              .setLineStyle(2) // Dashed line
-              .setLineColor('#EF4444')
-              .setBodyBackgroundColor('#EF4444')
-              .setBodyTextColor('#FFFFFF')
-              .setBodyBorderColor('#B91C1C')
-              .setQuantityBackgroundColor('#B91C1C')
-              .setQuantityTextColor('#FFFFFF')
-              .setCancelButtonBackgroundColor('#B91C1C')
-              .setCancelButtonIconColor('#FFFFFF')
-              .onMove(() => {
-                const newPrice = order.getPrice();
-                if (newPrice && newPrice > 0) {
-                  order.setText('🛑 STOP LOSS: ₹' + newPrice.toFixed(2));
-                  if (currentActiveSl) currentActiveSl.price = newPrice;
-                  window.dispatchEvent(new CustomEvent('FSM_SL_DRAGGED', { detail: { price: newPrice } }));
-                }
-              })
-              .onCancel(() => {
-                activeOrderLine = null;
-                currentActiveSl = null;
-                window.dispatchEvent(new CustomEvent('FSM_SL_CANCELLED'));
+            currentActivePos = { ...pos, tvSymbol: tvSym };
+            try {
+              host.positionUpdate({
+                id: posId,
+                symbol: tvSym,
+                qty: pos.qty,
+                side: pos.side === 'BUY' ? 1 : -1,
+                avgPrice: pos.avgPrice || pos.entryPrice
               });
+              console.log('[ScalpMaster Bridge] Native Broker Position updated:', tvSym, pos.qty, '@', pos.avgPrice);
+            } catch(err) {
+              console.warn('[ScalpMaster Bridge] Position update error:', err);
+            }
+          }
+        }
 
-            activeOrderLine = order;
-            currentActiveSl = { price, qty };
-            console.log('[ScalpMaster Bridge] Rendered Stop Loss OrderLine at ₹' + price);
-          } catch(err) {
-            console.error('[ScalpMaster Bridge] OrderLine creation error:', err);
+        // -------------------------------------------------------------
+        // STOP-LOSS ORDER UPDATE (Native Broker + Fallback OrderLine)
+        // -------------------------------------------------------------
+        async function renderStopLoss(price, qty, symbol, side) {
+          if (!price || price <= 0) return;
+          const res = await waitForBrokerOrChart(20000);
+          if (!res) return;
+
+          const tvSym = formatTvSymbol(symbol || (currentActiveSl ? currentActiveSl.symbol : ''));
+          const slId = 'FSM_SL_' + (symbol || 'MAIN');
+          const posId = 'FSM_POS_' + (symbol || 'MAIN');
+          currentActiveSl = { price, qty, symbol: tvSym, side };
+
+          // 1. Primary: Native FYERS / TradingView Broker Host
+          if (res.type === 'broker') {
+            const host = res.host;
+            try {
+              // Register SL order directly in TradingView native broker
+              host.orderUpdate({
+                id: slId,
+                symbol: tvSym,
+                qty: qty || 1,
+                side: side === 'BUY' ? -1 : 1, // Opposing side to close
+                type: 3, // OrderType.Stop
+                status: 6, // OrderStatus.Working
+                stopPrice: price,
+                price: price,
+                limitPrice: price,
+                parentId: posId,
+                parentType: 2 // ParentType.Position (Bracket SL on Position!)
+              });
+              console.log('[ScalpMaster Bridge] Native TradingView Bracket SL order rendered at ₹' + price);
+            } catch(err) {
+              console.warn('[ScalpMaster Bridge] Native SL orderUpdate error:', err);
+            }
+          }
+
+          // 2. Also ensure TradingView visual chart orderLine is drawn (Direct Canvas Fallback)
+          try {
+            if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
+              const chart = window.tvWidget.activeChart();
+              if (chart && typeof chart.createOrderLine === 'function') {
+                if (activeOrderLine) {
+                  try { activeOrderLine.remove(); } catch(e) {}
+                  activeOrderLine = null;
+                }
+                const order = await chart.createOrderLine();
+                order.setPrice(price)
+                  .setText('🛑 STOP LOSS: ₹' + price.toFixed(2))
+                  .setQuantity(String(qty || ''))
+                  .setExtendLeft(true)
+                  .setLineWidth(2)
+                  .setLineStyle(2)
+                  .setLineColor('#EF4444')
+                  .setBodyBackgroundColor('#EF4444')
+                  .setBodyTextColor('#FFFFFF')
+                  .setBodyBorderColor('#B91C1C')
+                  .setQuantityBackgroundColor('#B91C1C')
+                  .setQuantityTextColor('#FFFFFF')
+                  .setCancelButtonBackgroundColor('#B91C1C')
+                  .setCancelButtonIconColor('#FFFFFF')
+                  .onMove(() => {
+                    const newPrice = order.getPrice();
+                    if (newPrice && newPrice > 0) {
+                      order.setText('🛑 STOP LOSS: ₹' + newPrice.toFixed(2));
+                      if (currentActiveSl) currentActiveSl.price = newPrice;
+                      window.dispatchEvent(new CustomEvent('FSM_SL_DRAGGED', { detail: { price: newPrice } }));
+                    }
+                  })
+                  .onCancel(() => {
+                    activeOrderLine = null;
+                    currentActiveSl = null;
+                    window.dispatchEvent(new CustomEvent('FSM_SL_CANCELLED'));
+                  });
+                activeOrderLine = order;
+              }
+            }
+          } catch(err) {}
+        }
+
+        // Remove Stop Loss
+        async function removeStopLoss() {
+          const slId = currentActiveSl ? ('FSM_SL_' + (currentActiveSl.symbol || 'MAIN')) : 'FSM_SL_MAIN';
+          currentActiveSl = null;
+
+          if (window.broker && window.broker._host && typeof window.broker._host.orderUpdate === 'function') {
+            try {
+              window.broker._host.orderUpdate({
+                id: slId,
+                status: 1 // OrderStatus.Canceled
+              });
+            } catch(e) {}
+          }
+
+          if (activeOrderLine) {
+            try { activeOrderLine.remove(); } catch(e) {}
             activeOrderLine = null;
           }
         }
 
-        // Set / Recreate Stop Loss
-        window.addEventListener('FSM_CHART_SET_SL', async (e) => {
-          const { price, qty } = e.detail || {};
+        // -------------------------------------------------------------
+        // EXECUTION MARKER ON CHART
+        // -------------------------------------------------------------
+        async function placeMarker(side, price, text, qty, time) {
+          const res = await waitForBrokerOrChart(15000);
           if (!price || price <= 0) return;
-          currentActiveSl = { price, qty };
-          await renderOrderLine(price, qty);
-        });
 
-        // Periodic or Event-Driven SL Health Check
-        window.addEventListener('FSM_CHART_ENSURE_SL', async (e) => {
-          const { price, qty } = e.detail || {};
-          if (!price || price <= 0) return;
-          currentActiveSl = { price, qty };
-          if (!activeOrderLine) {
-            await renderOrderLine(price, qty);
+          let chart = null;
+          if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
+            chart = window.tvWidget.activeChart();
           }
-        });
 
-        // Remove Stop Loss Line
-        window.addEventListener('FSM_CHART_REMOVE_SL', () => {
-          currentActiveSl = null;
-          if (activeOrderLine) {
-            try {
-              activeOrderLine.remove();
-            } catch(e) {}
-            activeOrderLine = null;
-          }
-        });
-
-        // Place Execution Marker on Chart (Pins arrow cleanly to active/latest candle)
-        window.addEventListener('FSM_CHART_PLACE_MARKER', async (e) => {
-          const chart = await waitForChart(10000);
-          if (!chart) return;
-          const { side, price, text, qty, time } = e.detail || {};
-          if (!price || price <= 0) return;
-
-          // Determine accurate candle timestamp in seconds
+          // Compute accurate candle time
           let markerTime = time;
-          if (!markerTime) {
+          if (!markerTime && chart) {
             try {
               const vr = chart.getVisibleRange();
-              if (vr && vr.to) {
-                markerTime = Math.floor(vr.to) - 60;
-              }
-            } catch(err) {}
-            if (!markerTime) markerTime = Math.floor(Date.now() / 1000);
+              if (vr && vr.to) markerTime = Math.floor(vr.to) - 60;
+            } catch(e) {}
           }
+          if (!markerTime) markerTime = Math.floor(Date.now() / 1000);
 
           try {
-            if (typeof chart.createExecutionShape === 'function') {
+            if (chart && typeof chart.createExecutionShape === 'function') {
               const exec = await chart.createExecutionShape();
               exec.setTime(markerTime)
                 .setPrice(price)
@@ -217,8 +332,8 @@
                 .setArrowColor(side.toLowerCase() === 'buy' ? '#00E676' : '#FF5252')
                 .setTextColor(side.toLowerCase() === 'buy' ? '#00E676' : '#FF5252');
               createdShapes.push(exec);
-              console.log('[ScalpMaster Bridge] Placed execution marker:', text || side, '@', price, 'time:', markerTime);
-            } else if (typeof chart.createShape === 'function') {
+              console.log('[ScalpMaster Bridge] Execution marker placed:', text || side, '@', price);
+            } else if (chart && typeof chart.createShape === 'function') {
               const shapeId = await chart.createShape(
                 { time: markerTime, price: price },
                 {
@@ -231,47 +346,79 @@
                 }
               );
               createdShapes.push({ remove: () => chart.removeEntity(shapeId) });
+            } else if (window.broker && window.broker._host && typeof window.broker._host.executionUpdate === 'function') {
+              // Native Broker execution event
+              window.broker._host.executionUpdate({
+                id: 'FSM_EXEC_' + Date.now(),
+                price: price,
+                time: markerTime,
+                side: side.toLowerCase() === 'buy' ? 1 : -1,
+                qty: qty || 1
+              });
             }
           } catch(err) {
-            console.warn('[ScalpMaster Bridge] Execution marker error:', err);
+            console.warn('[ScalpMaster Bridge] Marker error:', err);
+          }
+        }
+
+        // -------------------------------------------------------------
+        // EVENT LISTENERS
+        // -------------------------------------------------------------
+        window.addEventListener('FSM_CHART_POS_UPDATE', (e) => {
+          updateNativePosition(e.detail);
+        });
+
+        window.addEventListener('FSM_CHART_SET_SL', (e) => {
+          const { price, qty, symbol, side } = e.detail || {};
+          renderStopLoss(price, qty, symbol, side);
+        });
+
+        window.addEventListener('FSM_CHART_ENSURE_SL', (e) => {
+          const { price, qty, symbol, side } = e.detail || {};
+          if (price && price > 0) {
+            renderStopLoss(price, qty, symbol, side);
           }
         });
 
-        // Clear all markers
+        window.addEventListener('FSM_CHART_REMOVE_SL', () => {
+          removeStopLoss();
+        });
+
+        window.addEventListener('FSM_CHART_PLACE_MARKER', (e) => {
+          const { side, price, text, qty, time } = e.detail || {};
+          placeMarker(side, price, text, qty, time);
+        });
+
         window.addEventListener('FSM_CHART_CLEAR_ALL', () => {
-          currentActiveSl = null;
-          if (activeOrderLine) {
-            try { activeOrderLine.remove(); } catch(e) {}
-            activeOrderLine = null;
-          }
+          updateNativePosition(null);
+          removeStopLoss();
           createdShapes.forEach(s => {
             try { s.remove(); } catch(e) {}
           });
           createdShapes = [];
         });
 
-        // Listen for Symbol / Timeframe change to automatically restore SL
-        async function hookChartEvents() {
-          const chart = await waitForChart(20000);
-          if (!chart) return;
-          try {
-            if (chart.onSymbolChanged && typeof chart.onSymbolChanged().subscribe === 'function') {
-              chart.onSymbolChanged().subscribe(null, () => {
-                if (currentActiveSl) {
-                  setTimeout(() => renderOrderLine(currentActiveSl.price, currentActiveSl.qty), 600);
-                }
-              });
-            }
-            if (chart.onIntervalChanged && typeof chart.onIntervalChanged().subscribe === 'function') {
-              chart.onIntervalChanged().subscribe(null, () => {
-                if (currentActiveSl) {
-                  setTimeout(() => renderOrderLine(currentActiveSl.price, currentActiveSl.qty), 600);
-                }
-              });
-            }
-          } catch(err) {}
+        // Auto-reconnect on TradingView symbol or resolution switch
+        function hookTvEvents() {
+          if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
+            try {
+              const chart = window.tvWidget.activeChart();
+              if (chart && chart.onSymbolChanged) {
+                chart.onSymbolChanged().subscribe(null, () => {
+                  if (currentActivePos) updateNativePosition(currentActivePos);
+                  if (currentActiveSl) renderStopLoss(currentActiveSl.price, currentActiveSl.qty, currentActiveSl.symbol, currentActiveSl.side);
+                });
+              }
+              if (chart && chart.onIntervalChanged) {
+                chart.onIntervalChanged().subscribe(null, () => {
+                  if (currentActivePos) updateNativePosition(currentActivePos);
+                  if (currentActiveSl) renderStopLoss(currentActiveSl.price, currentActiveSl.qty, currentActiveSl.symbol, currentActiveSl.side);
+                });
+              }
+            } catch(e) {}
+          }
         }
-        hookChartEvents();
+        setTimeout(hookTvEvents, 3000);
       })();
     `;
     (document.head || document.documentElement).appendChild(script);
@@ -296,6 +443,15 @@
       saveState();
       updateSlDisplay();
       showToast('Stop Loss cancelled');
+    }
+  });
+
+  window.addEventListener('FSM_POS_CLOSE_CLICKED', () => {
+    if (state.activePosition) {
+      const currentPrice = state.ltp > 0 ? state.ltp : state.activePosition.entryPrice;
+      state.dayStats.totalTrades += 1;
+      closeActivePositionInternal(state.activePosition.qty, currentPrice, 'CHART EXIT');
+      showToast(`Position squared off from Chart (Trade #${state.dayStats.totalTrades})`);
     }
   });
 
@@ -474,9 +630,20 @@
           state.minimized = !!saved.minimized;
           state.mode = saved.mode || 'PRACTICE';
 
+          // Restore Position on chart
+          if (state.activePosition) {
+            window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
+              detail: {
+                symbol: state.activePosition.symbol,
+                side: state.activePosition.side,
+                qty: state.activePosition.qty,
+                avgPrice: state.activePosition.entryPrice
+              }
+            }));
+          }
           // Restore SL line on chart once chart is fully ready
           if (state.activePosition && state.activePosition.stopLoss) {
-            restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty);
+            restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty, state.activePosition.symbol, state.activePosition.side);
           }
           // Restore past execution markers on chart
           if (state.chartMarkers && state.chartMarkers.length > 0) {
@@ -500,8 +667,18 @@
           state.minimized = !!saved.minimized;
           state.mode = saved.mode || 'PRACTICE';
 
+          if (state.activePosition) {
+            window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
+              detail: {
+                symbol: state.activePosition.symbol,
+                side: state.activePosition.side,
+                qty: state.activePosition.qty,
+                avgPrice: state.activePosition.entryPrice
+              }
+            }));
+          }
           if (state.activePosition && state.activePosition.stopLoss) {
-            restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty);
+            restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty, state.activePosition.symbol, state.activePosition.side);
           }
           if (state.chartMarkers && state.chartMarkers.length > 0) {
             restoreChartMarkers();
@@ -513,15 +690,15 @@
   }
 
   // Helper to restore SL on initial load with repeated retries until TradingView is ready
-  function restoreChartStopLoss(price, qty, attempts = 0) {
+  function restoreChartStopLoss(price, qty, symbol, side, attempts = 0) {
     if (attempts > 15) return;
     window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
-      detail: { price: price, qty: qty }
+      detail: { price: price, qty: qty, symbol: symbol || (state.activePosition ? state.activePosition.symbol : ''), side: side || (state.activePosition ? state.activePosition.side : 'BUY') }
     }));
     if (attempts < 5) {
       setTimeout(() => {
         if (state.activePosition && state.activePosition.stopLoss) {
-          restoreChartStopLoss(price, qty, attempts + 1);
+          restoreChartStopLoss(price, qty, symbol, side, attempts + 1);
         }
       }, 1200 + attempts * 800);
     }
@@ -1031,6 +1208,16 @@
         qty
       );
 
+      // Update Native TradingView Broker Position Line
+      window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
+        detail: {
+          symbol: state.symbol,
+          side: side,
+          qty: qty,
+          avgPrice: currentPrice
+        }
+      }));
+
       playSound(side);
       showToast(`${side} ${qty} ${state.symbol} @ ₹${currentPrice.toFixed(2)} (Trade #${state.dayStats.totalTrades})`);
       logAnalyticsEvent('scalp_order_executed', {
@@ -1057,9 +1244,19 @@
         qty
       );
 
+      // Update Native TradingView Broker Position Line
+      window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
+        detail: {
+          symbol: state.activePosition.symbol,
+          side: side,
+          qty: totalQty,
+          avgPrice: state.activePosition.entryPrice
+        }
+      }));
+
       if (state.activePosition.stopLoss) {
         window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
-          detail: { price: state.activePosition.stopLoss, qty: totalQty }
+          detail: { price: state.activePosition.stopLoss, qty: totalQty, symbol: state.activePosition.symbol, side: state.activePosition.side }
         }));
       }
 
@@ -1092,9 +1289,19 @@
 
       if (state.activePosition.stopLoss) {
         window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
-          detail: { price: state.activePosition.stopLoss, qty: remainingQty }
+          detail: { price: state.activePosition.stopLoss, qty: remainingQty, symbol: state.activePosition.symbol, side: state.activePosition.side }
         }));
       }
+
+      // Update Native TradingView Broker Position Line
+      window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
+        detail: {
+          symbol: state.activePosition.symbol,
+          side: state.activePosition.side,
+          qty: remainingQty,
+          avgPrice: state.activePosition.entryPrice
+        }
+      }));
 
       showToast(`Closed ${closeQty} Qty. Remaining: ${remainingQty} Qty (Trade #${state.dayStats.totalTrades})`);
       saveState();
@@ -1176,6 +1383,7 @@
     // If all qty closed, clean up active position & remove SL line from chart
     if (closeQty >= state.activePosition.qty) {
       state.activePosition = null;
+      window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', { detail: null }));
       window.dispatchEvent(new CustomEvent('FSM_CHART_REMOVE_SL'));
     }
 
@@ -1201,7 +1409,7 @@
 
     // Dispatch fresh event to TradingView Chart Bridge
     window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
-      detail: { price: slPrice, qty: state.activePosition.qty }
+      detail: { price: slPrice, qty: state.activePosition.qty, symbol: state.activePosition.symbol, side: state.activePosition.side }
     }));
 
     showToast(`Stop Loss placed at ₹${slPrice.toFixed(2)} (${points} pts)`);
@@ -1229,7 +1437,7 @@
 
     // Dispatch fresh event to TradingView Chart Bridge
     window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
-      detail: { price: price, qty: state.activePosition.qty }
+      detail: { price: price, qty: state.activePosition.qty, symbol: state.activePosition.symbol, side: state.activePosition.side }
     }));
 
     showToast(`Stop Loss placed at ₹${price.toFixed(2)} (${pts > 0 ? pts.toFixed(1) + ' pts' : 'Manual'})`);
