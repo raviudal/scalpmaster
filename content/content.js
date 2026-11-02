@@ -405,12 +405,14 @@
               const chart = window.tvWidget.activeChart();
               if (chart && chart.onSymbolChanged) {
                 chart.onSymbolChanged().subscribe(null, () => {
+                  trackActiveTvChart();
                   if (currentActivePos) updateNativePosition(currentActivePos);
                   if (currentActiveSl) renderStopLoss(currentActiveSl.price, currentActiveSl.qty, currentActiveSl.symbol, currentActiveSl.side);
                 });
               }
               if (chart && chart.onIntervalChanged) {
                 chart.onIntervalChanged().subscribe(null, () => {
+                  trackActiveTvChart();
                   if (currentActivePos) updateNativePosition(currentActivePos);
                   if (currentActiveSl) renderStopLoss(currentActiveSl.price, currentActiveSl.qty, currentActiveSl.symbol, currentActiveSl.side);
                 });
@@ -418,7 +420,53 @@
             } catch(e) {}
           }
         }
-        setTimeout(hookTvEvents, 3000);
+        setTimeout(hookTvEvents, 2000);
+
+        // Continuous Active Chart & Symbol Tracker (Multi-chart layouts)
+        let lastReportedSymbol = '';
+
+        function trackActiveTvChart() {
+          try {
+            if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
+              const chart = window.tvWidget.activeChart();
+              if (chart) {
+                let sym = '';
+                if (typeof chart.symbol === 'function') sym = chart.symbol() || '';
+                let desc = '';
+                if (typeof chart.symbolExt === 'function') {
+                  const ext = chart.symbolExt();
+                  if (ext) {
+                    desc = ext.description || ext.short_name || ext.name || '';
+                    if (!sym && ext.symbol) sym = ext.symbol;
+                  }
+                }
+
+                if (sym) {
+                  document.documentElement.dataset.fsmActiveChartSymbol = sym;
+                  if (desc) document.documentElement.dataset.fsmActiveChartDesc = desc;
+
+                  if (sym !== lastReportedSymbol) {
+                    lastReportedSymbol = sym;
+                    window.dispatchEvent(new CustomEvent('FSM_ACTIVE_CHART_CHANGED', {
+                      detail: { symbol: sym, description: desc }
+                    }));
+                  }
+                }
+              }
+            }
+          } catch(e) {}
+        }
+
+        setInterval(trackActiveTvChart, 200);
+
+        if (window.tvWidget && typeof window.tvWidget.onChartFocus === 'function') {
+          try {
+            window.tvWidget.onChartFocus(() => setTimeout(trackActiveTvChart, 50));
+          } catch(e) {}
+        }
+
+        document.addEventListener('pointerdown', () => setTimeout(trackActiveTvChart, 100), true);
+        window.addEventListener('focus', () => setTimeout(trackActiveTvChart, 100), true);
       })();
     `;
     (document.head || document.documentElement).appendChild(script);
@@ -452,6 +500,17 @@
       state.dayStats.totalTrades += 1;
       closeActivePositionInternal(state.activePosition.qty, currentPrice, 'CHART EXIT');
       showToast(`Position squared off from Chart (Trade #${state.dayStats.totalTrades})`);
+    }
+  });
+
+  // Listen to active chart focus changes from TradingView bridge (Multi-chart layouts)
+  window.addEventListener('FSM_ACTIVE_CHART_CHANGED', (e) => {
+    const { symbol } = e.detail || {};
+    if (symbol) {
+      const cleanSym = symbol.replace(/^(NSE|BSE|MCX):/, '').trim();
+      if (!state.activePosition) {
+        handleSymbolUpdate(cleanSym);
+      }
     }
   });
 
@@ -823,19 +882,137 @@
     return { price: null, symbol: null };
   }
 
-  // TV Iframe Access
-  function getTvIframeDocument() {
+  // TV Iframe Access & Multi-Chart Event Hooking
+  function hookIframeEvents() {
     const iframes = document.querySelectorAll('iframe');
     for (const f of iframes) {
-      if (f.id && f.id.startsWith('tradingview')) {
-        try {
-          if (f.contentDocument && f.contentDocument.body) {
-            return f.contentDocument;
-          }
-        } catch (e) {}
+      try {
+        const doc = f.contentDocument;
+        if (doc && !doc.__fsm_hooked) {
+          doc.__fsm_hooked = true;
+          doc.addEventListener('pointerdown', () => {
+            setTimeout(scrapeActiveMarketData, 50);
+          }, true);
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Find the currently active / focused chart container in multi-chart or single-chart layouts
+  function getActiveChartElement(targetSymbol = '') {
+    const normTarget = normalizeSymbolName(targetSymbol);
+    const iframes = document.querySelectorAll('iframe');
+    const allContainers = [];
+
+    // Search in all iframes
+    for (const f of iframes) {
+      try {
+        const doc = f.contentDocument;
+        if (doc && doc.body) {
+          const containers = doc.querySelectorAll('.chart-container');
+          containers.forEach(c => allContainers.push({ container: c, doc: doc, iframe: f }));
+        }
+      } catch (e) {}
+    }
+
+    // Also check main document
+    const mainContainers = document.querySelectorAll('.chart-container');
+    mainContainers.forEach(c => allContainers.push({ container: c, doc: document, iframe: null }));
+
+    if (allContainers.length === 0) return null;
+    if (allContainers.length === 1) return allContainers[0];
+
+    // Priority 1: Container explicitly marked active by TradingView
+    const explicitActive = allContainers.find(c =>
+      c.container.classList.contains('active') ||
+      c.container.classList.contains('chart-container-active') ||
+      c.container.getAttribute('data-is-active') === 'true'
+    );
+    if (explicitActive) return explicitActive;
+
+    // Priority 2: If targetSymbol is provided, find the container whose text matches the target symbol
+    if (normTarget) {
+      const match = allContainers.find(c => {
+        const text = normalizeSymbolName(c.container.innerText || '');
+        return text.includes(normTarget) || normTarget.includes(text);
+      });
+      if (match) return match;
+    }
+
+    // Priority 3: Fallback to the first container
+    return allContainers[0];
+  }
+
+  // Scrape symbol and live ticking price (LTP) from a specific chart container
+  function scrapeChartContainer(container) {
+    if (!container) return { price: null, symbol: null };
+
+    let sym = null;
+    let price = null;
+
+    // 1. Symbol Extraction
+    const symBtn = container.querySelector('.js-button-text') ||
+                   container.querySelector('button[class*="title-"]') ||
+                   container.querySelector('div[class*="symbol-title"]');
+    if (symBtn && symBtn.innerText && symBtn.innerText.trim()) {
+      sym = symBtn.innerText.trim();
+    }
+
+    if (!sym) {
+      const legendItem = container.querySelector('[data-name="legend-series-item"]') ||
+                         container.querySelector('div[class*="seriesTitle-"]') ||
+                         container.querySelector('div[class*="itemTitle-"]');
+      if (legendItem && legendItem.innerText) {
+        const parts = legendItem.innerText.split('·');
+        if (parts[0] && parts[0].trim()) sym = parts[0].trim();
       }
     }
-    return null;
+
+    // 2. Live Price (LTP) Extraction
+    // a) Legend Candle Close Value (C) - Real-time candle close price is the exact LTP
+    const legend = container.querySelector('.pane-legend') ||
+                   container.querySelector('[class*="legend-"]') ||
+                   container.querySelector('[class*="valuesWrapper"]');
+    if (legend && legend.innerText) {
+      const cMatch = legend.innerText.match(/(?:^|\s)C\s*([\d,]+(?:\.\d+)?)/i);
+      if (cMatch) {
+        const cp = parseFloat(cMatch[1].replace(/,/g, ''));
+        if (!isNaN(cp) && cp > 0) price = cp;
+      }
+    }
+
+    // b) Price Scale Axis Last Value badge (right vertical scale)
+    if (price === null) {
+      const axisBadge = container.querySelector('[data-name="price-axis-last-value"]') ||
+                        container.querySelector('.price-axis-last-value') ||
+                        container.querySelector('div[class*="lastPrice-"]') ||
+                        container.querySelector('div[class*="last-value-"]') ||
+                        container.querySelector('div[class*="highlight-"]');
+      if (axisBadge && axisBadge.innerText) {
+        const ap = parseFloat(axisBadge.innerText.replace(/,/g, '').trim());
+        if (!isNaN(ap) && ap > 0) price = ap;
+      }
+    }
+
+    // c) Buy & Sell Trading Order Buttons in chart header
+    if (price === null) {
+      const buyBtn = container.querySelector('[data-name="buy-order-button"] .buttonText-hw_3o_pb') ||
+                     container.querySelector('[data-name="buy-order-button"] [class*="buttonText"]');
+      const sellBtn = container.querySelector('[data-name="sell-order-button"] .buttonText-hw_3o_pb') ||
+                      container.querySelector('[data-name="sell-order-button"] [class*="buttonText"]');
+      const bp = buyBtn ? parseFloat(buyBtn.innerText.replace(/,/g, '').trim()) : NaN;
+      const sp = sellBtn ? parseFloat(sellBtn.innerText.replace(/,/g, '').trim()) : NaN;
+
+      if (!isNaN(bp) && bp > 0 && !isNaN(sp) && sp > 0) {
+        price = parseFloat(((bp + sp) / 2).toFixed(2));
+      } else if (!isNaN(bp) && bp > 0) {
+        price = bp;
+      } else if (!isNaN(sp) && sp > 0) {
+        price = sp;
+      }
+    }
+
+    return { price, symbol: sym };
   }
 
   // Query FYERS Local IndexedDB for accurate master contract & lot size
@@ -998,37 +1175,40 @@
   function scrapeActiveMarketData() {
     try {
       checkDayRollover();
+      hookIframeEvents();
 
       let detectedPrice = null;
       let detectedSymbol = null;
 
-      // 1. From document.title (fastest, zero-DOM overhead)
-      const titleData = quickScrapeTitle();
-      if (titleData.price !== null) {
-        detectedPrice = titleData.price;
-        detectedSymbol = titleData.symbol;
+      // 1. From TradingView Bridge Active Chart (Primary Source of Truth in multi-chart)
+      const bridgeSym = document.documentElement.dataset.fsmActiveChartSymbol;
+      if (bridgeSym) {
+        detectedSymbol = bridgeSym.replace(/^(NSE|BSE|MCX):/, '').trim();
       }
 
-      // 2. From TradingView Iframe fallback
-      if (detectedPrice === null || !detectedSymbol) {
-        const tvDoc = getTvIframeDocument();
-        if (tvDoc) {
-          const activeChart = tvDoc.querySelector('.chart-container.active') || tvDoc.querySelector('.chart-container');
-          if (activeChart) {
-            if (!detectedSymbol) {
-              const symBtn = activeChart.querySelector('.js-button-text') || activeChart.querySelector('button[class*="title-"]');
-              if (symBtn && symBtn.innerText && symBtn.innerText.trim()) {
-                detectedSymbol = symBtn.innerText.trim();
-              }
-            }
-            if (detectedPrice === null) {
-              const buyBtnPrice = activeChart.querySelector('[data-name="buy-order-button"] .buttonText-hw_3o_pb') ||
-                                  activeChart.querySelector('[data-name="buy-order-button"] [class*="buttonText"]');
-              if (buyBtnPrice && buyBtnPrice.innerText) {
-                const bp = parseFloat(buyBtnPrice.innerText.replace(/,/g, '').trim());
-                if (!isNaN(bp) && bp > 0) detectedPrice = bp;
-              }
-            }
+      // 2. From Active / Focused Chart Container in DOM
+      const activeObj = getActiveChartElement(detectedSymbol);
+      if (activeObj && activeObj.container) {
+        const scraped = scrapeChartContainer(activeObj.container);
+        if (!detectedSymbol && scraped.symbol) {
+          detectedSymbol = scraped.symbol.replace(/^(NSE|BSE|MCX):/, '').trim();
+        }
+        if (scraped.price !== null && !isNaN(scraped.price) && scraped.price > 0) {
+          detectedPrice = scraped.price;
+        }
+      }
+
+      // 3. Fallback to document.title ONLY IF:
+      //    a) Price is still null, AND
+      //    b) title symbol matches detectedSymbol (or no symbol was detected yet)
+      if (detectedPrice === null) {
+        const titleData = quickScrapeTitle();
+        if (titleData.price !== null) {
+          if (!detectedSymbol) {
+            detectedSymbol = titleData.symbol;
+            detectedPrice = titleData.price;
+          } else if (normalizeSymbolName(titleData.symbol) === normalizeSymbolName(detectedSymbol)) {
+            detectedPrice = titleData.price;
           }
         }
       }
