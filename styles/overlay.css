@@ -487,40 +487,67 @@
 .fsm-pos-details {
   display: flex;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--fsm-text-muted);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
-  padding-top: 3px;
+  padding-top: 4px;
+}
+
+.fsm-pos-sym {
+  font-weight: 800;
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 3px;
+  padding: 1px 5px;
+  letter-spacing: 0.2px;
+}
+
+.fsm-order-sym {
+  font-weight: 800;
+  font-size: 10.5px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 3px;
+  padding: 1px 4px;
+  letter-spacing: 0.2px;
 }
 
 /* Stop Loss Bar in Position Card */
 .fsm-sl-section {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 5px;
-  padding: 5px 6px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 6px;
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
+  margin-top: 5px;
 }
 
 .fsm-sl-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .fsm-sl-label {
   color: #f87171;
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 11px;
   display: flex;
   align-items: center;
   gap: 3px;
+  letter-spacing: 0.3px;
 }
 
 .fsm-sl-price {
   font-weight: 800;
+  font-size: 11.5px;
   color: #fff;
   font-family: monospace;
 }
@@ -528,16 +555,16 @@
 .fsm-sl-controls {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
 .fsm-sl-btn {
   background: rgba(239, 68, 68, 0.2);
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  border: 1px solid rgba(239, 68, 68, 0.45);
   color: #fca5a5;
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 9px;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 10.5px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.12s;
@@ -557,9 +584,9 @@
   background: transparent;
   border: none;
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
-  padding: 0 2px;
+  padding: 0 3px;
 }
 .fsm-sl-clear:hover {
   color: #f87171;
@@ -569,9 +596,9 @@
 .fsm-sl-manual-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 5px;
-  padding-top: 4px;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 5px;
   border-top: 1px dashed rgba(239, 68, 68, 0.25);
 }
 
@@ -580,9 +607,9 @@
   display: flex;
   align-items: center;
   background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: 4px;
-  padding: 2px 5px;
+  padding: 3px 6px;
   transition: all 0.15s ease;
 }
 
@@ -592,10 +619,10 @@
 }
 
 .fsm-sl-manual-curr {
-  font-size: 10px;
+  font-size: 12px;
   color: #ef4444;
-  font-weight: 700;
-  margin-right: 3px;
+  font-weight: 800;
+  margin-right: 4px;
 }
 
 .fsm-sl-input {
@@ -604,17 +631,17 @@
   border: none;
   outline: none;
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-family: monospace;
-  font-weight: 700;
+  font-weight: 800;
   padding: 2px 0;
 }
 
 .fsm-sl-input::placeholder {
   color: #64748b;
-  font-size: 9px;
+  font-size: 10px;
   font-family: sans-serif;
-  font-weight: 400;
+  font-weight: 500;
 }
 
 .fsm-btn-manual-sl {
@@ -622,12 +649,12 @@
   border: 1px solid #ef4444;
   color: #fff;
   border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 9.5px;
+  padding: 4px 10px;
+  font-size: 11.5px;
   font-weight: 800;
   cursor: pointer;
   white-space: nowrap;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.5px;
   transition: all 0.15s ease;
 }
 

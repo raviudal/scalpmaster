@@ -68,15 +68,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const v6 = allData && allData['fsm_state_v6'] ? allData['fsm_state_v6'] : {};
       const v5 = allData && allData['fsm_state_v5'] ? allData['fsm_state_v5'] : {};
 
-      let trades = v7.completedTrades || [];
-      if (!trades || trades.length === 0) {
-        trades = (v6.completedTrades && v6.completedTrades.length > 0) ? v6.completedTrades : (v5.completedTrades || []);
-        if (trades.length > 0) {
-          v7.completedTrades = trades;
-          v7.dayStats = v7.dayStats || v6.dayStats || v5.dayStats;
-          chrome.storage.local.set({ [STATE_KEY]: v7 });
-        }
+      // Prefer complete multi-day history from allCompletedTrades
+      let baseTrades = (v7.allCompletedTrades && v7.allCompletedTrades.length > 0)
+        ? v7.allCompletedTrades
+        : (v7.completedTrades || []);
+
+      if (!baseTrades || baseTrades.length === 0) {
+        baseTrades = (v6.completedTrades && v6.completedTrades.length > 0) ? v6.completedTrades : (v5.completedTrades || []);
       }
+
+      // Merge any today trades that might not yet be in baseTrades
+      const tradeMap = new Map();
+      baseTrades.forEach(t => tradeMap.set(t.id, t));
+      (v7.completedTrades || []).forEach(t => tradeMap.set(t.id, t));
+      let trades = Array.from(tradeMap.values());
+      trades.sort((a, b) => (b.id || 0) - (a.id || 0));
 
       currentCompletedTrades = trades;
       isHudVisible = v7.hudVisible !== false;

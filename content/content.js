@@ -460,9 +460,17 @@
   // -------------------------------------------------------------
   const STATE_KEY = 'fsm_state_v7';
 
+  function getTodayDateStr(d = new Date()) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   let state = {
     mode: 'PRACTICE',
     activeTab: 'position',
+    currentDate: getTodayDateStr(),
     symbol: '',
     symbolDesc: '',
     lotSize: 1,
@@ -471,7 +479,9 @@
     ltp: 0,
     prevLtp: 0,
     activePosition: null, // { symbol, side: 'BUY'|'SELL', qty, entryPrice, time, lastKnownLtp, stopLoss: null, slPoints: null }
-    completedTrades: [],
+    completedTrades: [], // Today's completed trades
+    allCompletedTrades: [], // All historical trades across days (for 15-day equity curve & CSV)
+    chartMarkers: [],
     dayStats: {
       grossPnL: 0,
       totalCharges: 0,
@@ -616,79 +626,133 @@
 
   // Load Saved State
   function loadState() {
+    const todayStr = getTodayDateStr();
+
+    function applySavedState(saved) {
+      if (!saved) return;
+      state.currentDate = saved.currentDate || todayStr;
+      state.allCompletedTrades = saved.allCompletedTrades || [];
+
+      // Consolidate any completedTrades into allCompletedTrades
+      if (saved.completedTrades && saved.completedTrades.length > 0) {
+        saved.completedTrades.forEach(st => {
+          if (!state.allCompletedTrades.some(at => at.id === st.id)) {
+            state.allCompletedTrades.push(st);
+          }
+        });
+      }
+
+      // Check if day changed (New Day Auto-Reset)
+      if (saved.currentDate && saved.currentDate !== todayStr) {
+        state.currentDate = todayStr;
+        state.dayStats = {
+          grossPnL: 0,
+          totalCharges: 0,
+          netPnL: 0,
+          totalTrades: 0,
+          completedRounds: 0,
+          wins: 0,
+          losses: 0,
+          winRate: 0,
+          peakPnL: 0,
+          maxDrawdown: 0
+        };
+        state.completedTrades = [];
+        state.chartMarkers = [];
+      } else {
+        state.dayStats = saved.dayStats || state.dayStats;
+        const savedTrades = saved.completedTrades || [];
+        state.completedTrades = savedTrades.filter(t => {
+          const tDate = t.date || (t.id ? getTodayDateStr(new Date(t.id)) : todayStr);
+          return tDate === todayStr;
+        });
+        state.chartMarkers = saved.chartMarkers || [];
+      }
+
+      state.activePosition = saved.activePosition || null;
+      state.lots = saved.lots || 1;
+      state.lotSize = saved.lotSize && saved.lotSize > 1 ? saved.lotSize : state.lotSize;
+      state.qty = (state.lots || 1) * (state.lotSize || 1);
+      state.hudVisible = saved.hudVisible !== undefined ? saved.hudVisible : true;
+      state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
+      state.minimized = !!saved.minimized;
+      state.mode = saved.mode || 'PRACTICE';
+
+      // Restore Position on chart
+      if (state.activePosition) {
+        window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
+          detail: {
+            symbol: state.activePosition.symbol,
+            side: state.activePosition.side,
+            qty: state.activePosition.qty,
+            avgPrice: state.activePosition.entryPrice
+          }
+        }));
+      }
+      // Restore SL line on chart once chart is fully ready
+      if (state.activePosition && state.activePosition.stopLoss) {
+        restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty, state.activePosition.symbol, state.activePosition.side);
+      }
+      // Restore past execution markers on chart
+      if (state.chartMarkers && state.chartMarkers.length > 0) {
+        restoreChartMarkers();
+      }
+
+      saveState();
+      renderHUD();
+    }
+
     if (chrome && chrome.storage && chrome.storage.local) {
       chrome.storage.local.get([STATE_KEY], (res) => {
         if (res && res[STATE_KEY]) {
-          const saved = res[STATE_KEY];
-          state.dayStats = saved.dayStats || state.dayStats;
-          state.completedTrades = saved.completedTrades || [];
-          state.chartMarkers = saved.chartMarkers || [];
-          state.activePosition = saved.activePosition || null;
-          state.lots = saved.lots || 1;
-          state.lotSize = saved.lotSize && saved.lotSize > 1 ? saved.lotSize : state.lotSize;
-          state.qty = (state.lots || 1) * (state.lotSize || 1);
-          state.hudVisible = saved.hudVisible !== undefined ? saved.hudVisible : true;
-          state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
-          state.minimized = !!saved.minimized;
-          state.mode = saved.mode || 'PRACTICE';
-
-          // Restore Position on chart
-          if (state.activePosition) {
-            window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
-              detail: {
-                symbol: state.activePosition.symbol,
-                side: state.activePosition.side,
-                qty: state.activePosition.qty,
-                avgPrice: state.activePosition.entryPrice
-              }
-            }));
-          }
-          // Restore SL line on chart once chart is fully ready
-          if (state.activePosition && state.activePosition.stopLoss) {
-            restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty, state.activePosition.symbol, state.activePosition.side);
-          }
-          // Restore past execution markers on chart
-          if (state.chartMarkers && state.chartMarkers.length > 0) {
-            restoreChartMarkers();
-          }
+          applySavedState(res[STATE_KEY]);
+        } else {
+          renderHUD();
         }
-        renderHUD();
       });
     } else {
       try {
         const raw = localStorage.getItem(STATE_KEY);
         if (raw) {
-          const saved = JSON.parse(raw);
-          state.dayStats = saved.dayStats || state.dayStats;
-          state.completedTrades = saved.completedTrades || [];
-          state.chartMarkers = saved.chartMarkers || [];
-          state.activePosition = saved.activePosition || null;
-          state.lots = saved.lots || 1;
-          state.lotSize = saved.lotSize && saved.lotSize > 1 ? saved.lotSize : state.lotSize;
-          state.qty = (state.lots || 1) * (state.lotSize || 1);
-          state.hudVisible = saved.hudVisible !== undefined ? saved.hudVisible : true;
-          state.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
-          state.minimized = !!saved.minimized;
-          state.mode = saved.mode || 'PRACTICE';
-
-          if (state.activePosition) {
-            window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
-              detail: {
-                symbol: state.activePosition.symbol,
-                side: state.activePosition.side,
-                qty: state.activePosition.qty,
-                avgPrice: state.activePosition.entryPrice
-              }
-            }));
-          }
-          if (state.activePosition && state.activePosition.stopLoss) {
-            restoreChartStopLoss(state.activePosition.stopLoss, state.activePosition.qty, state.activePosition.symbol, state.activePosition.side);
-          }
-          if (state.chartMarkers && state.chartMarkers.length > 0) {
-            restoreChartMarkers();
-          }
+          applySavedState(JSON.parse(raw));
+        } else {
+          renderHUD();
         }
-      } catch(e) {}
+      } catch(e) {
+        renderHUD();
+      }
+    }
+  }
+
+  // Periodic Check for New Day Rollover (Midnight transition)
+  function checkDayRollover() {
+    const todayStr = getTodayDateStr();
+    if (state.currentDate && state.currentDate !== todayStr) {
+      if (state.completedTrades && state.completedTrades.length > 0) {
+        state.allCompletedTrades = state.allCompletedTrades || [];
+        state.completedTrades.forEach(st => {
+          if (!state.allCompletedTrades.some(at => at.id === st.id)) {
+            state.allCompletedTrades.push(st);
+          }
+        });
+      }
+
+      state.currentDate = todayStr;
+      state.dayStats = {
+        grossPnL: 0,
+        totalCharges: 0,
+        netPnL: 0,
+        totalTrades: 0,
+        completedRounds: 0,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        peakPnL: 0,
+        maxDrawdown: 0
+      };
+      state.completedTrades = [];
+      state.chartMarkers = [];
+      saveState();
       renderHUD();
     }
   }
@@ -933,6 +997,8 @@
 
   function scrapeActiveMarketData() {
     try {
+      checkDayRollover();
+
       let detectedPrice = null;
       let detectedSymbol = null;
 
@@ -1158,7 +1224,11 @@
     const activePnlEl = document.getElementById('fsm-active-pnl-val');
     if (activePnlEl && state.activePosition) {
       const sign = pnl >= 0 ? '+' : '';
+      const sym = state.activePosition.symbol || state.symbol || '';
       activePnlEl.innerHTML = `
+        <div style="font-size: 10.5px; color: #94a3b8; font-weight: 700; margin-bottom: 2px;">
+          <span style="color: #38bdf8; font-weight: 800;">${sym}</span> P&L:
+        </div>
         <span class="${pnl >= 0 ? 'fsm-pnl-positive' : 'fsm-pnl-negative'}">${sign}₹${pnl.toFixed(2)} (${points >= 0 ? '+' : ''}${points.toFixed(2)} pts)</span>
         <span style="font-size: 10px; color: var(--fsm-text-muted); font-weight: 500; display: block; margin-top: 1px;">
           Est. Charges: ₹${charges.toFixed(2)} | Net: ${netPnl >= 0 ? '+' : ''}₹${netPnl.toFixed(2)}
@@ -1373,9 +1443,11 @@
     const charges = chargeInfo.totalCharges;
     const netPnl = parseFloat((grossPnl - charges).toFixed(2));
 
+    const todayStr = getTodayDateStr();
     const trade = {
       id: Date.now(),
-      symbol: state.activePosition.symbol,
+      date: todayStr,
+      symbol: state.activePosition.symbol || state.symbol || '',
       side: state.activePosition.side,
       qty: closeQty,
       buyPrice: parseFloat(buyPrice.toFixed(2)),
@@ -1393,6 +1465,8 @@
     };
 
     state.completedTrades.unshift(trade);
+    state.allCompletedTrades = state.allCompletedTrades || [];
+    state.allCompletedTrades.unshift(trade);
     state.dayStats.completedRounds = (state.dayStats.completedRounds || 0) + 1;
     state.dayStats.grossPnL = parseFloat((state.dayStats.grossPnL + grossPnl).toFixed(2));
     state.dayStats.totalCharges = parseFloat((state.dayStats.totalCharges + charges).toFixed(2));
@@ -1663,12 +1737,18 @@
           ${state.activePosition ? `
             <div class="fsm-position-card">
               <div class="fsm-position-header">
-                <span class="fsm-pos-type ${state.activePosition.side === 'BUY' ? 'fsm-type-long' : 'fsm-type-short'}">
-                  ${state.activePosition.side} ${state.activePosition.qty} Qty
-                </span>
-                <span style="color: var(--fsm-text-muted); font-size: 9px;">${state.activePosition.time}</span>
+                <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
+                  <span class="fsm-pos-sym">${state.activePosition.symbol || state.symbol}</span>
+                  <span class="fsm-pos-type ${state.activePosition.side === 'BUY' ? 'fsm-type-long' : 'fsm-type-short'}">
+                    ${state.activePosition.side} ${state.activePosition.qty} Qty
+                  </span>
+                </div>
+                <span style="color: var(--fsm-text-muted); font-size: 9.5px; font-weight: 600;">${state.activePosition.time}</span>
               </div>
               <div class="fsm-position-pnl" id="fsm-active-pnl-val">
+                <div style="font-size: 10.5px; color: #94a3b8; font-weight: 700; margin-bottom: 2px;">
+                  <span style="color: #38bdf8; font-weight: 800;">${state.activePosition.symbol || state.symbol}</span> P&L:
+                </div>
                 --
               </div>
               <div class="fsm-pos-details">
@@ -1722,7 +1802,8 @@
             ` : state.completedTrades.map(t => `
               <div class="fsm-order-card">
                 <div class="fsm-order-top">
-                  <div style="display: flex; align-items: center; gap: 4px;">
+                  <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                    <span class="fsm-order-sym">${t.symbol || state.symbol || 'NIFTY'}</span>
                     <span class="fsm-order-side ${t.side === 'BUY' ? 'fsm-type-long' : 'fsm-type-short'}">${t.side}</span>
                     <span style="font-weight: 700; font-size: 11px;">${t.qty} Qty</span>
                     ${t.reason ? `<span style="font-size: 8px; background: rgba(255,255,255,0.08); padding: 1px 3px; border-radius: 2px;">${t.reason}</span>` : ''}
