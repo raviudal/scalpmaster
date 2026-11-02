@@ -641,10 +641,23 @@
   // Calculate Real FYERS Brokerage & Regulatory Charges
   function calculateTradeCharges(symbol, qty, buyPrice, sellPrice) {
     const s = (symbol || '').toUpperCase();
-    const isOption = s.includes('CE') || s.includes('PE');
-    const isFuture = s.includes('FUT');
-    const buyTurnover = buyPrice * qty;
-    const sellTurnover = sellPrice * qty;
+    const desc = (state.symbolDesc || '').toUpperCase();
+
+    // Comprehensive Option Detection (CE, PE, CALL, PUT, OPT, or description)
+    const isOption = s.includes('CE') || s.includes('PE') || s.includes('CALL') || s.includes('PUT') || s.includes('OPT') ||
+                     desc.includes('OPTION') || desc.includes('CALL') || desc.includes('PUT');
+
+    // Index & Index Derivatives (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX, BANKEX)
+    const isIndex = s.includes('NIFTY') || s.includes('BANKNIFTY') || s.includes('FINNIFTY') ||
+                    s.includes('MIDCPNIFTY') || s.includes('SENSEX') || s.includes('BANKEX');
+
+    const isFuture = s.includes('FUT') || desc.includes('FUTURE');
+
+    const q = Math.max(1, qty || 1);
+    const bp = Math.max(0.05, buyPrice || 0);
+    const sp = Math.max(0.05, sellPrice || 0);
+    const buyTurnover = bp * q;
+    const sellTurnover = sp * q;
     const totalTurnover = buyTurnover + sellTurnover;
 
     let brokerage = 0;
@@ -654,17 +667,21 @@
     const sebiCharge = totalTurnover * 0.000001; // ₹10 per crore
 
     if (isOption) {
+      // FYERS Options: Flat ₹20 per executed order (₹40 round-trip)
       brokerage = 40.0;
-      stt = sellTurnover * 0.001;
-      exchangeCharge = totalTurnover * 0.0005;
-      stampDuty = buyTurnover * 0.00003;
-    } else if (isFuture) {
-      brokerage = Math.min(20, buyTurnover * 0.0003) + Math.min(20, sellTurnover * 0.0003);
-      stt = sellTurnover * 0.0002;
-      exchangeCharge = totalTurnover * 0.000019;
-      stampDuty = buyTurnover * 0.00002;
+      stt = sellTurnover * 0.001; // 0.1% on sell premium
+      exchangeCharge = totalTurnover * 0.0005; // 0.05% on total turnover
+      stampDuty = buyTurnover * 0.00003; // 0.003% on buy
+    } else if (isFuture || isIndex) {
+      // FYERS Index & Futures: Flat ₹20 per executed order (₹40 round-trip)
+      brokerage = 40.0;
+      stt = sellTurnover * 0.0002; // 0.02% on sell
+      exchangeCharge = totalTurnover * 0.000019; // 0.0019% on total turnover
+      stampDuty = buyTurnover * 0.00002; // 0.002% on buy
     } else {
+      // FYERS Equity Intraday: 0.03% or ₹20 per order
       brokerage = Math.min(20, buyTurnover * 0.0003) + Math.min(20, sellTurnover * 0.0003);
+      brokerage = Math.max(20.0, brokerage); // Standard realistic brokerage
       stt = sellTurnover * 0.00025;
       exchangeCharge = totalTurnover * 0.0000325;
       stampDuty = buyTurnover * 0.00003;
@@ -679,7 +696,7 @@
       exchangeCharge: parseFloat(exchangeCharge.toFixed(2)),
       gst: parseFloat(gst.toFixed(2)),
       stampDuty: parseFloat(stampDuty.toFixed(2)),
-      totalCharges
+      totalCharges: Math.max(20.0, totalCharges)
     };
   }
 
@@ -1570,28 +1587,7 @@
     } else {
       // Partial close -> Reduce quantity by selected qty
       closeActivePositionInternal(closeQty, currentPrice, 'PARTIAL EXIT');
-      const remainingQty = openQty - closeQty;
-      state.activePosition.qty = remainingQty;
-
-      if (state.activePosition.stopLoss) {
-        window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
-          detail: { price: state.activePosition.stopLoss, qty: remainingQty, symbol: state.activePosition.symbol, side: state.activePosition.side }
-        }));
-      }
-
-      // Update Native TradingView Broker Position Line
-      window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
-        detail: {
-          symbol: state.activePosition.symbol,
-          side: state.activePosition.side,
-          qty: remainingQty,
-          avgPrice: state.activePosition.entryPrice
-        }
-      }));
-
-      showToast(`Closed ${closeQty} Qty. Remaining: ${remainingQty} Qty (Trade #${state.dayStats.totalTrades})`);
-      saveState();
-      renderHUD();
+      showToast(`Closed ${closeQty} Qty. Remaining: ${state.activePosition ? state.activePosition.qty : 0} Qty (Trade #${state.dayStats.totalTrades})`);
     }
   }
 
@@ -1619,7 +1615,7 @@
     }
 
     const grossPnl = parseFloat((points * closeQty).toFixed(2));
-    const chargeInfo = calculateTradeCharges(state.activePosition.symbol, closeQty, buyPrice, sellPrice);
+    const chargeInfo = calculateTradeCharges(state.activePosition.symbol || state.symbol, closeQty, buyPrice, sellPrice);
     const charges = chargeInfo.totalCharges;
     const netPnl = parseFloat((grossPnl - charges).toFixed(2));
 
@@ -1648,8 +1644,8 @@
     state.allCompletedTrades = state.allCompletedTrades || [];
     state.allCompletedTrades.unshift(trade);
     state.dayStats.completedRounds = (state.dayStats.completedRounds || 0) + 1;
-    state.dayStats.grossPnL = parseFloat((state.dayStats.grossPnL + grossPnl).toFixed(2));
-    state.dayStats.totalCharges = parseFloat((state.dayStats.totalCharges + charges).toFixed(2));
+    state.dayStats.grossPnL = parseFloat(((state.dayStats.grossPnL || 0) + grossPnl).toFixed(2));
+    state.dayStats.totalCharges = parseFloat(((state.dayStats.totalCharges || 0) + charges).toFixed(2));
     state.dayStats.netPnL = parseFloat((state.dayStats.grossPnL - state.dayStats.totalCharges).toFixed(2));
 
     if (netPnl > 0) {
@@ -1670,11 +1666,27 @@
       state.dayStats.maxDrawdown = currentDrawdown;
     }
 
-    // If all qty closed, clean up active position & remove SL line from chart
-    if (closeQty >= state.activePosition.qty) {
+    // Clean up or adjust remaining active position
+    const isFullClose = (closeQty >= state.activePosition.qty);
+    if (isFullClose) {
       state.activePosition = null;
       window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', { detail: null }));
       window.dispatchEvent(new CustomEvent('FSM_CHART_REMOVE_SL'));
+    } else {
+      state.activePosition.qty -= closeQty;
+      if (state.activePosition.stopLoss) {
+        window.dispatchEvent(new CustomEvent('FSM_CHART_SET_SL', {
+          detail: { price: state.activePosition.stopLoss, qty: state.activePosition.qty, symbol: state.activePosition.symbol, side: state.activePosition.side }
+        }));
+      }
+      window.dispatchEvent(new CustomEvent('FSM_CHART_POS_UPDATE', {
+        detail: {
+          symbol: state.activePosition.symbol,
+          side: state.activePosition.side,
+          qty: state.activePosition.qty,
+          avgPrice: state.activePosition.entryPrice
+        }
+      }));
     }
 
     saveState();
