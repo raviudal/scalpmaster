@@ -425,33 +425,78 @@
         // Continuous Active Chart & Symbol Tracker (Multi-chart layouts)
         let lastReportedSymbol = '';
 
+        function getActiveChartInstance() {
+          if (!window.tvWidget) return null;
+          // Priority 1: Check window.currentChartId (FYERS official active chart index)
+          try {
+            if (typeof window.currentChartId === 'number' && typeof window.tvWidget.chart === 'function') {
+              const c = window.tvWidget.chart(window.currentChartId);
+              if (c) return c;
+            }
+          } catch(e) {}
+
+          // Priority 2: Check activeChartIndex() (TradingView library official API)
+          try {
+            if (typeof window.tvWidget.activeChartIndex === 'function' && typeof window.tvWidget.chart === 'function') {
+              const idx = window.tvWidget.activeChartIndex();
+              if (typeof idx === 'number' && idx >= 0) {
+                const c = window.tvWidget.chart(idx);
+                if (c) return c;
+              }
+            }
+          } catch(e) {}
+
+          // Priority 3: Fallback to activeChart()
+          try {
+            if (typeof window.tvWidget.activeChart === 'function') {
+              return window.tvWidget.activeChart();
+            }
+          } catch(e) {}
+
+          return null;
+        }
+
         function trackActiveTvChart() {
           try {
-            if (window.tvWidget && typeof window.tvWidget.activeChart === 'function') {
-              const chart = window.tvWidget.activeChart();
-              if (chart) {
-                let sym = '';
-                if (typeof chart.symbol === 'function') sym = chart.symbol() || '';
-                let desc = '';
-                if (typeof chart.symbolExt === 'function') {
-                  const ext = chart.symbolExt();
-                  if (ext) {
-                    desc = ext.description || ext.short_name || ext.name || '';
-                    if (!sym && ext.symbol) sym = ext.symbol;
-                  }
-                }
+            let sym = '';
+            let desc = '';
 
-                if (sym) {
-                  document.documentElement.dataset.fsmActiveChartSymbol = sym;
-                  if (desc) document.documentElement.dataset.fsmActiveChartDesc = desc;
-
-                  if (sym !== lastReportedSymbol) {
-                    lastReportedSymbol = sym;
-                    window.dispatchEvent(new CustomEvent('FSM_ACTIVE_CHART_CHANGED', {
-                      detail: { symbol: sym, description: desc }
-                    }));
-                  }
+            const chart = getActiveChartInstance();
+            if (chart) {
+              if (typeof chart.symbol === 'function') sym = chart.symbol() || '';
+              if (typeof chart.symbolExt === 'function') {
+                const ext = chart.symbolExt();
+                if (ext) {
+                  desc = ext.description || ext.short_name || ext.name || '';
+                  if (!sym && ext.symbol) sym = ext.symbol;
                 }
+              }
+            }
+
+            // FYERS native fallbacks for active instrument
+            if (!sym && typeof window.getModalSymbol === 'function') {
+              const ms = window.getModalSymbol();
+              if (ms && typeof ms === 'string') sym = ms;
+            }
+            if (!sym && typeof window.symbol === 'function') {
+              const s = window.symbol();
+              if (s && typeof s === 'string') sym = s;
+            } else if (!sym && typeof window.symbol === 'string' && window.symbol) {
+              sym = window.symbol;
+            }
+            if (!sym && window.orderObj && window.orderObj.symbol) {
+              sym = window.orderObj.symbol;
+            }
+
+            if (sym) {
+              document.documentElement.dataset.fsmActiveChartSymbol = sym;
+              if (desc) document.documentElement.dataset.fsmActiveChartDesc = desc;
+
+              if (sym !== lastReportedSymbol) {
+                lastReportedSymbol = sym;
+                window.dispatchEvent(new CustomEvent('FSM_ACTIVE_CHART_CHANGED', {
+                  detail: { symbol: sym, description: desc }
+                }));
               }
             }
           } catch(e) {}
@@ -465,8 +510,31 @@
           } catch(e) {}
         }
 
+        // Hook clicks in main window
         document.addEventListener('pointerdown', () => setTimeout(trackActiveTvChart, 100), true);
         window.addEventListener('focus', () => setTimeout(trackActiveTvChart, 100), true);
+
+        // Hook clicks inside all iframe documents from main world
+        function hookIframeEventsInBridge() {
+          try {
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(f => {
+              try {
+                const idoc = f.contentDocument || f.contentWindow?.document;
+                if (idoc && !idoc.__fsm_bridge_hooked) {
+                  idoc.__fsm_bridge_hooked = true;
+                  ['pointerdown', 'mousedown', 'click'].forEach(evt => {
+                    idoc.addEventListener(evt, () => {
+                      setTimeout(trackActiveTvChart, 30);
+                      setTimeout(trackActiveTvChart, 150);
+                    }, true);
+                  });
+                }
+              } catch(e) {}
+            });
+          } catch(e) {}
+        }
+        setInterval(hookIframeEventsInBridge, 1000);
       })();
     `;
     (document.head || document.documentElement).appendChild(script);
@@ -510,6 +578,7 @@
       const cleanSym = symbol.replace(/^(NSE|BSE|MCX):/, '').trim();
       if (!state.activePosition) {
         handleSymbolUpdate(cleanSym);
+        setTimeout(scrapeActiveMarketData, 50);
       }
     }
   });
@@ -900,6 +969,9 @@
   }
 
   // TV Iframe Access & Multi-Chart Event Hooking
+  let lastInteractedContainer = null;
+  let lastInteractedTime = 0;
+
   function hookIframeEvents() {
     const iframes = document.querySelectorAll('iframe');
     for (const f of iframes) {
@@ -907,11 +979,45 @@
         const doc = f.contentDocument;
         if (doc && !doc.__fsm_hooked) {
           doc.__fsm_hooked = true;
-          doc.addEventListener('pointerdown', () => {
-            setTimeout(scrapeActiveMarketData, 50);
-          }, true);
+          ['pointerdown', 'mousedown', 'click'].forEach(evtType => {
+            doc.addEventListener(evtType, (e) => {
+              // Ignore clicks inside our HUD widget
+              if (e.target && e.target.closest && e.target.closest('#fyers-scalpmaster-hud')) return;
+
+              const clickedContainer = (e.target && e.target.closest) ?
+                (e.target.closest('.chart-container') ||
+                 e.target.closest('[class*="chartContainer"]') ||
+                 e.target.closest('[data-role="chart"]')) : null;
+
+              if (clickedContainer) {
+                lastInteractedContainer = clickedContainer;
+                lastInteractedTime = Date.now();
+              }
+              setTimeout(scrapeActiveMarketData, 30);
+              setTimeout(scrapeActiveMarketData, 100);
+            }, true);
+          });
         }
       } catch (e) {}
+    }
+
+    if (!document.__fsm_main_hooked) {
+      document.__fsm_main_hooked = true;
+      ['pointerdown', 'mousedown', 'click'].forEach(evtType => {
+        document.addEventListener(evtType, (e) => {
+          if (e.target && e.target.closest && e.target.closest('#fyers-scalpmaster-hud')) return;
+
+          const clicked = (e.target && e.target.closest) ?
+            (e.target.closest('.chart-container') ||
+             e.target.closest('[class*="chartContainer"]')) : null;
+
+          if (clicked) {
+            lastInteractedContainer = clicked;
+            lastInteractedTime = Date.now();
+          }
+          setTimeout(scrapeActiveMarketData, 30);
+        }, true);
+      });
     }
   }
 
@@ -926,37 +1032,78 @@
       try {
         const doc = f.contentDocument;
         if (doc && doc.body) {
-          const containers = doc.querySelectorAll('.chart-container');
+          const containers = doc.querySelectorAll('.chart-container, [class*="chartContainer"]');
           containers.forEach(c => allContainers.push({ container: c, doc: doc, iframe: f }));
         }
       } catch (e) {}
     }
 
     // Also check main document
-    const mainContainers = document.querySelectorAll('.chart-container');
+    const mainContainers = document.querySelectorAll('.chart-container, [class*="chartContainer"]');
     mainContainers.forEach(c => allContainers.push({ container: c, doc: document, iframe: null }));
 
     if (allContainers.length === 0) return null;
     if (allContainers.length === 1) return allContainers[0];
 
-    // Priority 1: Container explicitly marked active by TradingView
-    const explicitActive = allContainers.find(c =>
-      c.container.classList.contains('active') ||
-      c.container.classList.contains('chart-container-active') ||
-      c.container.getAttribute('data-is-active') === 'true'
-    );
-    if (explicitActive) return explicitActive;
-
-    // Priority 2: If targetSymbol is provided, find the container whose text matches the target symbol
+    // Priority 1: If targetSymbol is explicitly requested (e.g. background tracking for active position)
     if (normTarget) {
       const match = allContainers.find(c => {
+        const sc = scrapeChartContainer(c.container);
+        if (sc.symbol && normalizeSymbolName(sc.symbol) === normTarget) return true;
         const text = normalizeSymbolName(c.container.innerText || '');
         return text.includes(normTarget) || normTarget.includes(text);
       });
       if (match) return match;
     }
 
-    // Priority 3: Fallback to the first container
+    // Priority 2: User recently interacted with a container (within last 30 minutes)
+    if (lastInteractedContainer) {
+      const match = allContainers.find(c => c.container === lastInteractedContainer || c.container.contains(lastInteractedContainer));
+      if (match) return match;
+    }
+
+    // Priority 3: Visual Active indicator in TradingView
+    // TradingView multi-chart highlights the active chart with a blue border (rgb(41, 98, 255) / #2962ff)
+    // or classes containing 'active', 'chart-container-active', 'selected', 'focused', or data-is-active='true'
+    for (const c of allContainers) {
+      const el = c.container;
+      if (el.classList.contains('active') ||
+          el.classList.contains('chart-container-active') ||
+          el.getAttribute('data-is-active') === 'true' ||
+          el.getAttribute('data-active') === 'true') {
+        return c;
+      }
+      // Check closest wrapper
+      const parentActive = el.closest('.active, [class*="active-"], [class*="selected-"], [class*="focused-"]');
+      if (parentActive && !parentActive.contains(allContainers.find(o => o !== c)?.container)) {
+        return c;
+      }
+      // Check computed styles for TradingView active blue border
+      try {
+        const cs = c.doc.defaultView?.getComputedStyle(el);
+        if (cs) {
+          const bc = (cs.borderColor || '') + ' ' + (cs.outlineColor || '') + ' ' + (cs.boxShadow || '');
+          if (bc.includes('41, 98, 255') || bc.includes('33, 150, 243') || bc.includes('2962ff') || bc.includes('0, 229, 255')) {
+            return c;
+          }
+        }
+      } catch(e) {}
+    }
+
+    // Priority 4: Bridge symbol from TradingView widget / FYERS currentChartId
+    const bridgeSym = document.documentElement.dataset.fsmActiveChartSymbol;
+    if (bridgeSym) {
+      const normBridge = normalizeSymbolName(bridgeSym);
+      const match = allContainers.find(c => {
+        const sc = scrapeChartContainer(c.container);
+        if (sc.symbol && normalizeSymbolName(sc.symbol) === normBridge) return true;
+        const text = normalizeSymbolName(c.container.innerText || '');
+        return text.includes(normBridge) || normBridge.includes(text);
+      });
+      if (match) return match;
+    }
+
+    // Priority 5: Fallback to the first container
     return allContainers[0];
   }
 
@@ -970,7 +1117,9 @@
     // 1. Symbol Extraction
     const symBtn = container.querySelector('.js-button-text') ||
                    container.querySelector('button[class*="title-"]') ||
-                   container.querySelector('div[class*="symbol-title"]');
+                   container.querySelector('div[class*="symbol-title"]') ||
+                   container.querySelector('[data-name="legend-source-title"]') ||
+                   container.querySelector('div[class*="sourceTitle"]');
     if (symBtn && symBtn.innerText && symBtn.innerText.trim()) {
       sym = symBtn.innerText.trim();
     }
@@ -978,11 +1127,17 @@
     if (!sym) {
       const legendItem = container.querySelector('[data-name="legend-series-item"]') ||
                          container.querySelector('div[class*="seriesTitle-"]') ||
-                         container.querySelector('div[class*="itemTitle-"]');
+                         container.querySelector('div[class*="itemTitle-"]') ||
+                         container.querySelector('.pane-legend-line') ||
+                         container.querySelector('[class*="legend-"] [class*="titleWrapper-"]');
       if (legendItem && legendItem.innerText) {
         const parts = legendItem.innerText.split('·');
         if (parts[0] && parts[0].trim()) sym = parts[0].trim();
       }
+    }
+
+    if (sym) {
+      sym = sym.split('\n')[0].replace(/^(NSE|BSE|MCX):/i, '').trim();
     }
 
     // 2. Live Price (LTP) Extraction
@@ -1197,21 +1352,24 @@
       let detectedPrice = null;
       let detectedSymbol = null;
 
-      // 1. From TradingView Bridge Active Chart (Primary Source of Truth in multi-chart)
-      const bridgeSym = document.documentElement.dataset.fsmActiveChartSymbol;
-      if (bridgeSym) {
-        detectedSymbol = bridgeSym.replace(/^(NSE|BSE|MCX):/, '').trim();
-      }
-
-      // 2. From Active / Focused Chart Container in DOM
-      const activeObj = getActiveChartElement(detectedSymbol);
+      // 1. From Active / Focused Chart Container in DOM (Primary Source of Truth in multi-chart)
+      const activeObj = getActiveChartElement();
       if (activeObj && activeObj.container) {
         const scraped = scrapeChartContainer(activeObj.container);
-        if (!detectedSymbol && scraped.symbol) {
+        if (scraped.symbol) {
           detectedSymbol = scraped.symbol.replace(/^(NSE|BSE|MCX):/, '').trim();
         }
         if (scraped.price !== null && !isNaN(scraped.price) && scraped.price > 0) {
           detectedPrice = scraped.price;
+        }
+      }
+
+      // 2. Supplement / Fallback from TradingView Bridge Active Chart
+      const bridgeSym = document.documentElement.dataset.fsmActiveChartSymbol;
+      if (bridgeSym) {
+        const cleanBridge = bridgeSym.replace(/^(NSE|BSE|MCX):/, '').trim();
+        if (!detectedSymbol) {
+          detectedSymbol = cleanBridge;
         }
       }
 
@@ -1246,13 +1404,27 @@
         // Compare using normalized names (e.g. "NSE:NIFTY26N0322900CE" vs "NIFTY26N0322900CE")
         const normDetected = normalizeSymbolName(detectedSymbol);
         const normLocked = normalizeSymbolName(lockedSymbol);
-        const matchesActive = (!detectedSymbol || normDetected === normLocked);
+        const isOnSameChart = !!(normDetected && normDetected === normLocked);
 
-        if (matchesActive && detectedPrice !== null && !isNaN(detectedPrice) && detectedPrice > 0) {
-          state.prevLtp = state.ltp || detectedPrice;
-          state.ltp = detectedPrice;
-          state.activePosition.lastKnownLtp = detectedPrice;
-          renderLtpTick();
+        if (isOnSameChart) {
+          if (detectedPrice !== null && !isNaN(detectedPrice) && detectedPrice > 0) {
+            state.prevLtp = state.ltp || detectedPrice;
+            state.ltp = detectedPrice;
+            state.activePosition.lastKnownLtp = detectedPrice;
+            renderLtpTick();
+          }
+        } else {
+          // Off-chart: look for the locked trade's container in multi-chart layout
+          const lockedObj = getActiveChartElement(lockedSymbol);
+          if (lockedObj && lockedObj.container) {
+            const lockedScraped = scrapeChartContainer(lockedObj.container);
+            if (lockedScraped.price !== null && !isNaN(lockedScraped.price) && lockedScraped.price > 0) {
+              state.prevLtp = state.ltp || lockedScraped.price;
+              state.ltp = lockedScraped.price;
+              state.activePosition.lastKnownLtp = lockedScraped.price;
+              renderLtpTick();
+            }
+          }
         }
 
         // Show warning ONLY IF the user truly switched to another instrument
@@ -1287,11 +1459,8 @@
   function checkStopLossTrigger() {
     if (!state.activePosition || !state.activePosition.stopLoss) return;
 
-    if (state.symbol && state.activePosition.symbol && state.symbol !== state.activePosition.symbol) {
-      return;
-    }
-
-    const currentPrice = state.ltp;
+    // Strict Instrument Isolation: Evaluate ONLY against the active position's verified price
+    const currentPrice = state.activePosition.lastKnownLtp || state.ltp;
     if (!currentPrice || currentPrice <= 0) return;
 
     const sl = state.activePosition.stopLoss;
@@ -2056,10 +2225,21 @@
 
         // Force reload active instrument and master contract details
         lastCheckedSymbol = '';
-        const titleData = quickScrapeTitle();
-        const detectedSym = titleData.symbol || state.symbol;
-        if (detectedSym) {
-          await handleSymbolUpdate(detectedSym, true);
+        const activeObj = getActiveChartElement();
+        let symToRefresh = '';
+        if (activeObj && activeObj.container) {
+          const sc = scrapeChartContainer(activeObj.container);
+          if (sc.symbol) symToRefresh = sc.symbol;
+        }
+        if (!symToRefresh && document.documentElement.dataset.fsmActiveChartSymbol) {
+          symToRefresh = document.documentElement.dataset.fsmActiveChartSymbol.replace(/^(NSE|BSE|MCX):/, '').trim();
+        }
+        if (!symToRefresh) {
+          const titleData = quickScrapeTitle();
+          symToRefresh = titleData.symbol || state.symbol;
+        }
+        if (symToRefresh) {
+          await handleSymbolUpdate(symToRefresh, true);
         }
         scrapeActiveMarketData();
         renderHUD();
